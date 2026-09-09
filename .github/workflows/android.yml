@@ -9,6 +9,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      APPLOCK_KEYSTORE_BASE64: ${{ secrets.APPLOCK_KEYSTORE_BASE64 }}
+      APPLOCK_KEYSTORE_PASSWORD: ${{ secrets.APPLOCK_KEYSTORE_PASSWORD }}
+      APPLOCK_KEY_ALIAS: ${{ secrets.APPLOCK_KEY_ALIAS }}
+      APPLOCK_KEY_PASSWORD: ${{ secrets.APPLOCK_KEY_PASSWORD }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
@@ -27,6 +33,12 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4.4.1
+
+      - name: Decode signing keystore
+        if: env.APPLOCK_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$APPLOCK_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "APPLOCK_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
       - name: Build with gradle
         run: ./gradlew clean assemble
