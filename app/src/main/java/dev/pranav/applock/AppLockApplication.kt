@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import dev.pranav.applock.core.broadcast.AutomationReceiver
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.data.repository.AppLockRepository
 import org.lsposed.hiddenapibypass.HiddenApiBypass
@@ -26,6 +27,11 @@ class AppLockApplication : Application() {
 
         LogUtils.initialize(this)
         LogUtils.setLoggingEnabled(appLockRepository.isLoggingEnabled())
+
+        // Keep the exported receiver's component state in step with the preference, in case the
+        // two drifted apart across a restore or an update.
+        AutomationReceiver.setComponentEnabled(this, appLockRepository.isAutomationEnabled())
+
         // Purge logs older than 3 days on every app start (run in background to avoid ANR)
         thread(start = true, name = "LogPurge") {
             LogUtils.purgeOldLogs()

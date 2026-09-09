@@ -316,4 +316,20 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
         If AppLock has helped you, please consider a small donation—any amount means the world to me and keeps this project alive.
         Thank you for believing in my work!
     </string>
+
+    <!-- Automation -->
+    <string name="settings_screen_automation_title">Automation</string>
+    <string name="settings_screen_automation_control_title">Allow automation apps</string>
+    <string name="settings_screen_automation_control_desc">Let apps like MacroDroid or Tasker turn protection on and off, for example when you reach a trusted Wi-Fi network. Requires the access token below.</string>
+    <string name="settings_screen_automation_token_title">Access token</string>
+    <string name="settings_screen_automation_token_desc">Tap to view, copy or replace the token</string>
+    <string name="settings_screen_automation_token_desc_disabled">Turn on automation access to use a token</string>
+    <string name="settings_screen_automation_dialog_title">Automation access</string>
+    <string name="settings_screen_automation_dialog_intro">Send one of these broadcasts to AppLock with the token as a string extra named \"token\". Set dev.pranav.applock as the target package: Android does not deliver implicit broadcasts to manifest-declared receivers.</string>
+    <string name="settings_screen_automation_dialog_token_label">Token</string>
+    <string name="settings_screen_automation_copy">Copy token</string>
+    <string name="settings_screen_automation_copied">Token copied</string>
+    <string name="settings_screen_automation_regenerate">Replace</string>
+    <string name="settings_screen_automation_regenerated">New token generated. Update your automation app.</string>
+    <string name="settings_screen_automation_close">Done</string>
 </resources>

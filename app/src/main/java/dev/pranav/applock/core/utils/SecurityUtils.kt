@@ -9,6 +9,7 @@ object SecurityUtils {
 
     private const val HASH_ALGORITHM = "SHA-256"
     private const val SALT_LENGTH = 16
+    private const val TOKEN_LENGTH = 24
     const val MAX_PASSWORD_LENGTH = 64
 
     /**
@@ -28,6 +29,22 @@ object SecurityUtils {
         return ByteArray(SALT_LENGTH).also { salt ->
             SecureRandom().nextBytes(salt)
         }
+    }
+
+    /**
+     * Generates a random token for automation apps to authenticate broadcasts with.
+     */
+    fun generateToken(): String {
+        val bytes = ByteArray(TOKEN_LENGTH).also { SecureRandom().nextBytes(it) }
+        return Base64.encodeToString(bytes, Base64.NO_PADDING or Base64.NO_WRAP or Base64.URL_SAFE)
+    }
+
+    /**
+     * Compares two secrets without leaking their content through timing.
+     */
+    fun constantTimeEquals(a: String?, b: String?): Boolean {
+        if (a == null || b == null) return false
+        return MessageDigest.isEqual(a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
     }
 
     fun hashPassword(password: String): String {

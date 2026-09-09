@@ -121,6 +121,18 @@ object AppLockManager {
         temporarilyUnlockedApp = ""
     }
 
+    /**
+     * Drops every unlock state at once. Used when protection is switched back on, so an app
+     * left unlocked while protection was off does not stay open afterwards.
+     */
+    fun clearAllUnlockStates() {
+        temporarilyUnlockedApp = ""
+        appUnlockTimes.clear()
+        recentlyLeftApp = ""
+        recentlyLeftTime = 0L
+        LogUtils.d(TAG, "Cleared all unlock states")
+    }
+
     fun clearAppUnlockState(packageName: String) {
         if (temporarilyUnlockedApp == packageName) {
             temporarilyUnlockedApp = ""

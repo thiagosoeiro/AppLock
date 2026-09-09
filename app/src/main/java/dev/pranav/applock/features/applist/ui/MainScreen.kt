@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import dev.pranav.applock.R
+import dev.pranav.applock.core.broadcast.AutomationReceiver
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.utils.appLockRepository
@@ -166,6 +167,7 @@ fun MainScreen(
                         onClick = {
                             appLockRepository.setProtectEnabled(!applockEnabled)
                             applockEnabled = !applockEnabled
+                            AutomationReceiver.notifyStateChanged(context, applockEnabled)
                         },
                         shape = RoundedCornerShape(16.dp),
                         color = if (applockEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
