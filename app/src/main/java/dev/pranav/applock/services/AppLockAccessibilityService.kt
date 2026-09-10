@@ -418,6 +418,13 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Check if user reached our own App info page (Uninstall / Force stop / Clear data live here)
+        if (isOwnAppInfoPage(event)) {
+            Log.d(TAG, "Blocking own app info page")
+            blockDeactivationAttempt()
+            return
+        }
+
         // Check if on device admin page and our app is visible
         val isDeviceAdminPage = isDeviceAdminPage(event)
         //val isOurAppVisible = findNodeWithTextContaining(rootNode, "App Lock") != null ||
@@ -442,6 +449,27 @@ class AppLockAccessibilityService : AccessibilityService() {
                 .contains(ownLabel)
 
         return isAccessibilitySettings || isSubSettings || isAlertDialog
+    }
+
+    /**
+     * True when the foreground window is our own App info page in Settings, where Uninstall, Force
+     * stop and Clear data live.
+     *
+     * The page title arrives in [AccessibilityEvent.getText] as a generic string ("App info" on
+     * One UI), never the app name, so the old name-in-event check could not catch it on most OEMs.
+     * The name is in the window content instead, as the header under the icon, so we read that.
+     *
+     * Only inspected on a window transition ([AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED]): the
+     * apps list is also a SubSettings window, but it opens scrolled to the top with our entry off
+     * screen, and scrolling it emits TYPE_WINDOW_CONTENT_CHANGED, which we ignore here. So this
+     * does not fire merely because our row happens to be visible in the list.
+     */
+    private fun isOwnAppInfoPage(event: AccessibilityEvent): Boolean {
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return false
+        if (event.packageName != DEVICE_ADMIN_SETTINGS_PACKAGE) return false
+
+        val root = rootInActiveWindow ?: return false
+        return findNodeWithTextContaining(root, ownLabel) != null
     }
 
     @SuppressLint("InlinedApi")
