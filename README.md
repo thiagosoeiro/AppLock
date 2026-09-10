@@ -66,7 +66,7 @@ root required.
 - Biometric and PIN authentication
 - Fingerprint, Face Unlock, and PIN support
 - Lock any app on your device
-- Anti-uninstall protection
+- Anti-uninstall protection ([how it behaves, and the "System Services" disguise](ANTI_UNINSTALL.md))
 - Anti-uninstall protection for user apps
 - Unlock timeout for convenience
 - No root required

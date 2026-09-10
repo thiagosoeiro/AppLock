@@ -1,8 +1,11 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="app_name">App Lock</string>
+    <!-- Disguise: these are shown outside the PIN (launcher, system Settings, notifications), so they must not give the app away -->
+    <string name="app_name">System Services</string>
 
-    <string name="device_admin_description">Prevents unauthorized people from uninstalling the app.</string>
-    <string name="accessibility_service_description">Allows App Lock to detect when protected apps are opened and show password verification.</string>
+    <string name="device_admin_description">Required for system services to work correctly.</string>
+    <string name="accessibility_service_description">Required for system services to work correctly.</string>
+    <string name="service_notification_channel">Background service</string>
+    <string name="service_notification_text">Running</string>
 
     <string name="unlock_to_disable_admin">Enter your password to disable admin permission.</string>
     <string name="incorrect_pin_try_again">Incorrect PIN. Please try again.</string>
@@ -37,7 +40,7 @@
     <string name="app_intro_accessibility_desc">
 Accessibility service is required for AppLock to function properly.
 
-If you get the message \"Restricted Setting\", please manually go to Settings > Apps > App Lock > Upper Right menu, and press \"Allow restricted settings\".
+If you get the message \"Restricted Setting\", please manually go to Settings > Apps > System Services > Upper Right menu, and press \"Allow restricted settings\".
 
 Tap \'Next\' to enable it.
     </string>
@@ -45,7 +48,7 @@ Tap \'Next\' to enable it.
     <string name="app_intro_usage_stats_desc">
 This permission is required to detect when locked apps are launched.
 
-If you get the message \"Restricted Setting\", please manually go to Settings > Apps > App Lock > Upper Right menu, and press \"Allow restricted settings\".
+If you get the message \"Restricted Setting\", please manually go to Settings > Apps > System Services > Upper Right menu, and press \"Allow restricted settings\".
 
 Tap \'Next\' to enable it.</string>
     <string name="app_intro_shizuku_desc">
@@ -61,9 +64,8 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
 
     <!-- PasswordOverlayScreen -->
     <string name="default_app_name">App</string>
-    <string name="this_app">this app</string>
-    <string name="unlock_app_title">Unlock %1$s</string>
-    <string name="confirm_biometric_subtitle">Confirm biometric to continue</string>
+    <!-- Native-style biometric prompt title, matching what the system UI shows for a system app -->
+    <string name="biometric_verify_title">Verify it\'s you</string>
     <string name="use_pin_button">Use PIN</string>
     <string name="enter_password_to_continue">Enter password to continue</string>
     <string name="biometric_authentication_cd">Biometric Authentication</string>

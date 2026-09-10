@@ -32,6 +32,20 @@ class AppLockAccessibilityService : AccessibilityService() {
     private val appLockRepository: AppLockRepository by lazy { applicationContext.appLockRepository() }
     private val keyboardPackages: List<String> by lazy { getKeyboardPackageNames() }
 
+    // Our label as Settings displays it; the anti-uninstall checks match on it, so they follow any rename.
+    private val ownLabel: String by lazy { applicationInfo.loadLabel(packageManager).toString() }
+
+    // Our version as Settings prints it on the App info page. Lists of apps never show a version,
+    // which is what separates that page from a list our name merely appears in.
+    private val ownVersionName: String by lazy {
+        try {
+            packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+        } catch (e: Exception) {
+            logError("Could not read own version name", e)
+            ""
+        }
+    }
+
     private var lastForegroundPackage = ""
 
     private var overlayManager: LockScreenOverlayManager? = null
@@ -415,14 +429,19 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Check if on device admin page and our app is visible
-        val isDeviceAdminPage = isDeviceAdminPage(event)
-        //val isOurAppVisible = findNodeWithTextContaining(rootNode, "App Lock") != null ||
-        //        findNodeWithTextContaining(rootNode, "AppLock") != null
+        // Check if user reached our own App info page (Uninstall / Force stop / Clear data live here)
+        if (isOwnAppInfoPage(event)) {
+            Log.d(TAG, "Blocking own app info page")
+            blockDeactivationAttempt()
+            return
+        }
 
-        LogUtils.d(TAG, "User is on device admin page: $isDeviceAdminPage, $event")
+        // Check if on the confirmation page for our own device admin
+        val isOwnDeviceAdminPage = isOwnDeviceAdminPage(event)
 
-        if (!isDeviceAdminPage) {
+        LogUtils.d(TAG, "User is on our device admin page: $isOwnDeviceAdminPage, $event")
+
+        if (!isOwnDeviceAdminPage) {
             return
         }
 
@@ -431,14 +450,42 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     private fun isDeactivationAttempt(event: AccessibilityEvent): Boolean {
         val isAccessibilitySettings = event.className in ACCESSIBILITY_SETTINGS_CLASSES &&
-                event.text.any { it.contains("App Lock") }
+                event.text.any { it.contains(ownLabel) }
         val isSubSettings = event.className == "com.android.settings.SubSettings" &&
-                event.text.any { it.contains("App Lock") }
+                event.text.any { it.contains(ownLabel) }
         val isAlertDialog =
             event.packageName == "com.google.android.packageinstaller" && event.className == "android.app.AlertDialog" && event.text.toString()
-                .lowercase().contains("App Lock")
+                .contains(ownLabel)
 
         return isAccessibilitySettings || isSubSettings || isAlertDialog
+    }
+
+    /**
+     * True when the foreground window is our own App info page in Settings, where Uninstall, Force
+     * stop and Clear data live.
+     *
+     * The page title arrives in [AccessibilityEvent.getText] as a generic string ("App info" on
+     * One UI), never the app name, so the old name-in-event check could not catch it on most OEMs.
+     * The name is in the window content instead, as the header under the icon, so we read that.
+     *
+     * Matching the name alone is not enough. The apps list and Accessibility > Installed apps are
+     * windows that carry our name too, as one row among many, and returning to either restores the
+     * scroll position that shows it - which locked the phone while merely browsing Settings. So
+     * require our version number on screen as well: Settings prints it on the App info page, app
+     * lists never do, and a version needs no localised string to recognise.
+     *
+     * Fails open. If an OEM's page omits the version this does not fire, leaving that page
+     * unguarded rather than locking the phone on the wrong screen - and Uninstall and Force stop
+     * there are blocked and greyed out by device admin regardless.
+     */
+    private fun isOwnAppInfoPage(event: AccessibilityEvent): Boolean {
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return false
+        if (event.packageName != DEVICE_ADMIN_SETTINGS_PACKAGE) return false
+        if (ownVersionName.isEmpty()) return false
+
+        val root = rootInActiveWindow ?: return false
+        return findNodeWithTextContaining(root, ownLabel) != null &&
+                findNodeWithTextContaining(root, ownVersionName) != null
     }
 
     @SuppressLint("InlinedApi")
@@ -452,15 +499,23 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun isDeviceAdminPage(event: AccessibilityEvent): Boolean {
-        val hasDeviceAdminDescription = event.contentDescription?.toString()?.lowercase()
-            ?.contains("Device admin app") == true &&
-                event.className == "android.widget.FrameLayout"
+    /**
+     * True when the foreground window is the confirmation page for *our* device admin - the page
+     * carrying the button that deactivates it.
+     *
+     * Narrower than it was. It used to match on the class name alone, the device admin list
+     * included, so opening that section or any other app's admin page bounced the user out.
+     * Deactivating ours still has to pass through this page, and [blockDeviceAdminDeactivation]
+     * only acts while our admin is already active, so granting it in the first place still works.
+     *
+     * The old content-description branch is gone with it: it lowercased the text and then looked
+     * for "Device admin app", so it could never match.
+     */
+    private fun isOwnDeviceAdminPage(event: AccessibilityEvent): Boolean {
+        if (event.className?.contains("DeviceAdminAdd") != true) return false
 
-        val isAdminConfigClass =
-            event.className!!.contains("DeviceAdminAdd") || event.className!!.contains("DeviceAdminSettings")
-
-        return hasDeviceAdminDescription || isAdminConfigClass
+        val root = rootInActiveWindow ?: return false
+        return findNodeWithTextContaining(root, ownLabel) != null
     }
 
     @SuppressLint("InlinedApi")
@@ -477,7 +532,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
                 Toast.makeText(
                     this,
-                    "Disable anti-uninstall from AppLock settings to remove this restriction.",
+                    "This action isn't allowed.",
                     Toast.LENGTH_LONG
                 ).show()
                 Log.w(TAG, "Blocked device admin deactivation attempt.")
