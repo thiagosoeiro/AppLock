@@ -1,10 +1,14 @@
 package dev.pranav.applock.features.settings.ui
 
 import android.app.admin.DevicePolicyManager
+import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
+import android.os.PersistableBundle
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,7 +19,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
@@ -32,11 +39,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.navigation.NavController
 import dev.pranav.applock.R
+import dev.pranav.applock.core.broadcast.AutomationReceiver
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.utils.LogUtils
@@ -90,6 +99,9 @@ fun SettingsScreen(
     var antiUninstallEnabled by remember { mutableStateOf(appLockRepository.isAntiUninstallEnabled()) }
     var disableHapticFeedback by remember { mutableStateOf(appLockRepository.shouldDisableHaptics()) }
     var loggingEnabled by remember { mutableStateOf(appLockRepository.isLoggingEnabled()) }
+    var automationEnabled by remember { mutableStateOf(appLockRepository.isAutomationEnabled()) }
+    var automationToken by remember { mutableStateOf(appLockRepository.getAutomationToken()) }
+    var showAutomationDialog by remember { mutableStateOf(false) }
 
     var showPermissionDialog by remember { mutableStateOf(false) }
     var showDeviceAdminDialog by remember { mutableStateOf(false) }
@@ -141,6 +153,29 @@ fun SettingsScreen(
                 appLockRepository.setUnlockTimeDuration(newDuration)
                 showUnlockTimeDialog = false
             }
+        )
+    }
+
+    if (showAutomationDialog) {
+        AutomationTokenDialog(
+            token = automationToken.orEmpty(),
+            onCopy = {
+                copyTokenToClipboard(context, automationToken.orEmpty())
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.settings_screen_automation_copied),
+                    Toast.LENGTH_SHORT
+                ).show()
+            },
+            onRegenerate = {
+                automationToken = appLockRepository.regenerateAutomationToken()
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.settings_screen_automation_regenerated),
+                    Toast.LENGTH_LONG
+                ).show()
+            },
+            onDismiss = { showAutomationDialog = false }
         )
     }
 
@@ -361,6 +396,55 @@ fun SettingsScreen(
                                     context.startActivity(
                                         Intent(context, AdminDisableActivity::class.java)
                                     )
+                                }
+                            }
+                        )
+                    )
+                )
+            }
+
+            item {
+                SectionTitle(text = stringResource(R.string.settings_screen_automation_title))
+            }
+
+            item {
+                SettingsGroup(
+                    items = listOf(
+                        ToggleSettingItem(
+                            icon = Icons.Default.SettingsRemote,
+                            title = stringResource(R.string.settings_screen_automation_control_title),
+                            subtitle = stringResource(R.string.settings_screen_automation_control_desc),
+                            checked = automationEnabled,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked && automationToken.isNullOrEmpty()) {
+                                    automationToken = appLockRepository.regenerateAutomationToken()
+                                }
+                                appLockRepository.setAutomationEnabled(isChecked)
+                                AutomationReceiver.setComponentEnabled(context, isChecked)
+                                automationEnabled = isChecked
+                            }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Key,
+                            title = stringResource(R.string.settings_screen_automation_token_title),
+                            subtitle = if (automationEnabled)
+                                stringResource(R.string.settings_screen_automation_token_desc)
+                            else
+                                stringResource(R.string.settings_screen_automation_token_desc_disabled),
+                            onClick = {
+                                if (!automationEnabled) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.settings_screen_automation_token_desc_disabled),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    if (automationToken.isNullOrEmpty()) {
+                                        automationToken =
+                                            appLockRepository.regenerateAutomationToken()
+                                    }
+                                    showAutomationDialog = true
                                 }
                             }
                         )
@@ -1008,6 +1092,91 @@ fun AccessibilityDialog(
             }
         }
     )
+}
+
+@Composable
+fun AutomationTokenDialog(
+    token: String,
+    onCopy: () -> Unit,
+    onRegenerate: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_screen_automation_dialog_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_screen_automation_dialog_intro),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                MonospaceBlock(
+                    listOf(
+                        AutomationReceiver.ACTION_ENABLE_PROTECTION,
+                        AutomationReceiver.ACTION_DISABLE_PROTECTION,
+                        AutomationReceiver.ACTION_QUERY_STATE
+                    ).joinToString("\n")
+                )
+                Text(
+                    text = stringResource(R.string.settings_screen_automation_dialog_token_label),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                MonospaceBlock(token)
+            }
+        },
+        confirmButton = {
+            FilledTonalButton(onClick = onCopy) {
+                Text(stringResource(R.string.settings_screen_automation_copy))
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onRegenerate) {
+                    Text(stringResource(R.string.settings_screen_automation_regenerate))
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.settings_screen_automation_close))
+                }
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+private fun MonospaceBlock(text: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        SelectionContainer {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(12.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Copies the token, flagged sensitive so Android 13+ keeps it out of the clipboard preview.
+ */
+private fun copyTokenToClipboard(context: Context, token: String) {
+    val clipboard =
+        context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    val clip = ClipData.newPlainText("AppLock automation token", token)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    clipboard.setPrimaryClip(clip)
 }
 
 @Composable

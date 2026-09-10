@@ -20,6 +20,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // CI signs with a keystore supplied through the environment when one is configured, so that
+    // successive builds share a signature and install over each other. Without it the build falls
+    // back to the debug key, which is regenerated per machine and per CI run.
+    val keystorePath: String? = System.getenv("APPLOCK_KEYSTORE")
+
+    signingConfigs {
+        if (!keystorePath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storeType = "PKCS12"
+                storePassword = System.getenv("APPLOCK_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("APPLOCK_KEY_ALIAS")
+                keyPassword = System.getenv("APPLOCK_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -31,7 +48,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (!keystorePath.isNullOrBlank()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {

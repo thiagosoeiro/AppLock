@@ -140,6 +140,21 @@
         </receiver>
 
 
+        <!--
+            Disabled by default; the Automation section in Settings enables the component once
+            the user opts in. Every action it accepts also requires the token generated there.
+        -->
+        <receiver
+            android:name=".core.broadcast.AutomationReceiver"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.pranav.applock.action.ENABLE_PROTECTION" />
+                <action android:name="dev.pranav.applock.action.DISABLE_PROTECTION" />
+                <action android:name="dev.pranav.applock.action.QUERY_PROTECTION_STATE" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

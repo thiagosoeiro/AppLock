@@ -114,6 +114,27 @@ class PreferencesRepository(context: Context) {
         return settingsPrefs.getBoolean(KEY_APPLOCK_ENABLED, DEFAULT_PROTECT_ENABLED)
     }
 
+    fun setAutomationEnabled(enabled: Boolean) {
+        settingsPrefs.edit(commit = true) { putBoolean(KEY_AUTOMATION_ENABLED, enabled) }
+    }
+
+    fun isAutomationEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_AUTOMATION_ENABLED, DEFAULT_AUTOMATION_ENABLED)
+    }
+
+    fun getAutomationToken(): String? {
+        return appLockPrefs.getString(KEY_AUTOMATION_TOKEN, null)
+    }
+
+    /**
+     * Replaces the automation token, invalidating any token already handed to an automation app.
+     */
+    fun regenerateAutomationToken(): String {
+        val token = SecurityUtils.generateToken()
+        appLockPrefs.edit(commit = true) { putString(KEY_AUTOMATION_TOKEN, token) }
+        return token
+    }
+
     fun setUnlockTimeDuration(minutes: Int) {
         settingsPrefs.edit { putInt(KEY_UNLOCK_TIME_DURATION, minutes) }
     }
@@ -190,8 +211,11 @@ class PreferencesRepository(context: Context) {
         private const val KEY_AUTO_UNLOCK = "auto_unlock"
         private const val KEY_SHOW_SYSTEM_APPS = "show_system_apps"
         private const val KEY_LOCK_TYPE = "lock_type"
+        private const val KEY_AUTOMATION_ENABLED = "automation_enabled"
+        private const val KEY_AUTOMATION_TOKEN = "automation_token"
 
         private const val DEFAULT_PROTECT_ENABLED = true
+        private const val DEFAULT_AUTOMATION_ENABLED = false
         private const val DEFAULT_UNLOCK_DURATION = 0
 
         const val LOCK_TYPE_PIN = "pin"
