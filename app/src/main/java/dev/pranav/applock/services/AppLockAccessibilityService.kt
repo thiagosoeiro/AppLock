@@ -7,8 +7,6 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.os.Handler
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -35,7 +33,6 @@ class AppLockAccessibilityService : AccessibilityService() {
     private val keyboardPackages: List<String> by lazy { getKeyboardPackageNames() }
 
     private var lastForegroundPackage = ""
-    private var isRecentsOpen: Boolean = false
 
     private var overlayManager: LockScreenOverlayManager? = null
     private lateinit var mainHandler: Handler
@@ -59,8 +56,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 if (intent?.action == Intent.ACTION_SCREEN_OFF) {
                     LogUtils.d(TAG, "Screen off detected. Resetting AppLock state.")
                     AppLockManager.isLockScreenShown.set(false)
-                    AppLockManager.clearTemporarilyUnlockedApp()
-                    AppLockManager.appUnlockTimes.clear()
+                    AppLockManager.clearAllUnlockStates()
                 }
             } catch (e: Exception) {
                 logError("Error in screenStateReceiver", e)
@@ -145,8 +141,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 Log.d(TAG, "Ignoring recents bug event: ${event.text}")
                 return
             }
-            if (!isRecentsOpen && isRecentlyOpened(event)) {
-                isRecentsOpen = true
+            if (isRecentlyOpened(event)) {
                 Log.d(TAG, "Recents opened")
             }
             handleWindowStateChanged(event)
@@ -174,13 +169,12 @@ class AppLockAccessibilityService : AccessibilityService() {
         when {
             isHomeScreenTransition(event) -> {
                 LogUtils.d(TAG, "Transitioning to home screen from recents")
-                clearTemporarilyUnlockedAppIfNeeded()
-                isRecentsOpen = false
+                releaseUnlockForNeutralSurface(event.packageName?.toString())
             }
 
             isHomeScreen -> {
                 LogUtils.d(TAG, "On home screen")
-                clearTemporarilyUnlockedAppIfNeeded()
+                releaseUnlockForNeutralSurface(event.packageName?.toString())
             }
         }
     }
@@ -204,22 +198,40 @@ class AppLockAccessibilityService : AccessibilityService() {
                 event.packageName == getSystemDefaultLauncherPackageName()
     }
 
-    private fun clearTemporarilyUnlockedAppIfNeeded(newPackage: String? = null) {
-        val shouldClear = newPackage == null ||
-                (newPackage != AppLockManager.temporarilyUnlockedApp &&
-                        newPackage !in appLockRepository.getTriggerExcludedApps())
+    /**
+     * Called when the launcher - home screen or recents - takes the foreground. The user has not
+     * necessarily moved on to anything else, so the unlock is held for a short return window
+     * rather than dropped outright.
+     */
+    private fun releaseUnlockForNeutralSurface(newPackage: String?) {
+        val unlockedApp = AppLockManager.temporarilyUnlockedApp
+        if (unlockedApp.isEmpty() || newPackage == unlockedApp) return
 
-        if (shouldClear) {
-            LogUtils.d(TAG, "Clearing temporarily unlocked app")
-            AppLockManager.clearTemporarilyUnlockedApp()
+        if (newPackage != null && newPackage in appLockRepository.getTriggerExcludedApps()) {
+            LogUtils.d(TAG, "$newPackage is trigger excluded, keeping $unlockedApp unlocked")
+            return
         }
+
+        LogUtils.d(TAG, "Holding unlock for $unlockedApp while on $newPackage")
+        AppLockManager.holdUnlockForReturn(unlockedApp)
+        AppLockManager.clearTemporarilyUnlockedApp()
+    }
+
+    /**
+     * The launcher draws both the home screen and, on most devices, the recents switcher. Neither
+     * means the user has opened something else, so an unlock survives them for a short window.
+     * Everything else that is not a real app - system UI, the intent resolver, keyboards - is
+     * already filtered out by [isValidPackageForLocking] before this is reached.
+     */
+    private fun isNeutralSurface(packageName: String): Boolean {
+        val launcher = getSystemDefaultLauncherPackageName()
+        return launcher.isNotEmpty() && packageName == launcher
     }
 
     private fun isValidPackageForLocking(packageName: String): Boolean {
         // Check if device is locked
         if (applicationContext.isDeviceLocked()) {
-            AppLockManager.appUnlockTimes.clear()
-            AppLockManager.clearTemporarilyUnlockedApp()
+            AppLockManager.clearAllUnlockStates()
             return false
         }
 
@@ -250,6 +262,8 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
 
+        val isNeutral = isNeutralSurface(currentForegroundPackage)
+
         // Fix for "Lock Immediately" not working when switching between apps
         val unlockedApp = AppLockManager.temporarilyUnlockedApp
         if (unlockedApp.isNotEmpty() &&
@@ -260,8 +274,16 @@ class AppLockAccessibilityService : AccessibilityService() {
                 TAG,
                 "Switched from unlocked app $unlockedApp to $currentForegroundPackage."
             )
-            AppLockManager.setRecentlyLeftApp(unlockedApp)
+            if (isNeutral) {
+                AppLockManager.holdUnlockForReturn(unlockedApp)
+            }
             AppLockManager.clearTemporarilyUnlockedApp()
+        }
+
+        // A real app taking over ends any pending return - the user went somewhere else rather
+        // than coming back. The held app itself is exempt: that is exactly the return we allow.
+        if (!isNeutral && !AppLockManager.isPendingReturn(currentForegroundPackage)) {
+            AppLockManager.dropPendingReturn()
         }
 
         checkAndLockApp(currentForegroundPackage, triggeringPackage, System.currentTimeMillis())
@@ -282,42 +304,15 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Return if app is temporarily unlocked
-        if (AppLockManager.isAppTemporarilyUnlocked(packageName)) {
-            return
-        }
-
-        AppLockManager.clearTemporarilyUnlockedApp()
-
         val unlockDurationMinutes = appLockRepository.getUnlockTimeDuration()
-        val unlockTimestamp = AppLockManager.appUnlockTimes[packageName] ?: 0L
 
         LogUtils.d(
             TAG,
-            "checkAndLockApp: pkg=$packageName, duration=$unlockDurationMinutes min, unlockTime=$unlockTimestamp, currentTime=$currentTime, isLockScreenShown=${AppLockManager.isLockScreenShown.get()}"
+            "checkAndLockApp: pkg=$packageName, duration=$unlockDurationMinutes min, currentTime=$currentTime, isLockScreenShown=${AppLockManager.isLockScreenShown.get()}"
         )
 
-        if (unlockDurationMinutes > 0 && unlockTimestamp > 0) {
-            if (unlockDurationMinutes >= 10_000) {
-                return
-            }
-
-            val durationMillis = unlockDurationMinutes.toLong() * 60L * 1000L
-
-            val elapsedMillis = currentTime - unlockTimestamp
-
-            LogUtils.d(
-                TAG,
-                "Grace period check: elapsed=${elapsedMillis}ms (${elapsedMillis / 1000}s), duration=${durationMillis}ms (${durationMillis / 1000}s)"
-            )
-
-            if (elapsedMillis < durationMillis) {
-                return
-            }
-
-            LogUtils.d(TAG, "Unlock grace period expired for $packageName. Clearing timestamp.")
-            AppLockManager.appUnlockTimes.remove(packageName)
-            AppLockManager.clearTemporarilyUnlockedApp()
+        if (!AppLockManager.shouldShowLockScreen(packageName, currentTime, unlockDurationMinutes)) {
+            return
         }
 
         if (AppLockManager.isLockScreenShown.get() ||
@@ -523,36 +518,8 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun getSystemDefaultLauncherPackageName(): String {
-        return try {
-            val packageManager = packageManager
-            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_HOME)
-            }
-
-            val resolveInfoList: List<ResolveInfo> = packageManager.queryIntentActivities(
-                homeIntent,
-                PackageManager.MATCH_DEFAULT_ONLY
-            )
-
-            val systemLauncher = resolveInfoList.find { resolveInfo ->
-                val isSystemApp = (resolveInfo.activityInfo.applicationInfo.flags and
-                        android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
-                val isOurApp = resolveInfo.activityInfo.packageName == packageName
-
-                isSystemApp && !isOurApp
-            }
-
-            systemLauncher?.activityInfo?.packageName?.also {
-                if (it.isEmpty()) {
-                    Log.w(TAG, "Could not find a clear system launcher package name.")
-                }
-            } ?: ""
-        } catch (e: Exception) {
-            logError("Error getting system default launcher package", e)
-            ""
-        }
-    }
+    fun getSystemDefaultLauncherPackageName(): String =
+        applicationContext.defaultLauncherPackageName()
 
     private fun startPrimaryBackendService() {
         try {
