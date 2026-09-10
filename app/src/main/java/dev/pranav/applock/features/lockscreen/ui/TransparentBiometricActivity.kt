@@ -79,10 +79,8 @@ class TransparentBiometricActivity: FragmentActivity() {
         val executor = ContextCompat.getMainExecutor(this)
         val biometricPrompt = BiometricPrompt(this, executor, authenticationCallback)
 
-        val appNameForPrompt = getString(R.string.this_app)
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(getString(R.string.unlock_app_title, appNameForPrompt))
-            .setSubtitle(getString(R.string.confirm_biometric_subtitle))
+            .setTitle(getString(R.string.biometric_verify_title))
             .setNegativeButtonText(getString(R.string.use_pin_button))
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_WEAK or

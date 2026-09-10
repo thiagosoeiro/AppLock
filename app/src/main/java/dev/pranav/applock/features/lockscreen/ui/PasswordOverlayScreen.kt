@@ -248,10 +248,8 @@ class PasswordOverlayActivity: FragmentActivity() {
         biometricPrompt =
             BiometricPrompt(this@PasswordOverlayActivity, executor, authenticationCallbackInternal)
 
-        val appNameForPrompt = appName.ifEmpty { getString(R.string.this_app) }
         promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(getString(R.string.unlock_app_title, appNameForPrompt))
-            .setSubtitle(getString(R.string.confirm_biometric_subtitle))
+            .setTitle(getString(R.string.biometric_verify_title))
             .setNegativeButtonText(getString(R.string.use_pin_button))
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_WEAK or

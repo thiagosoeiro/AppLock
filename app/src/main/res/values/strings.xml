@@ -64,9 +64,8 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
 
     <!-- PasswordOverlayScreen -->
     <string name="default_app_name">App</string>
-    <string name="this_app">this app</string>
-    <string name="unlock_app_title">Unlock %1$s</string>
-    <string name="confirm_biometric_subtitle">Confirm biometric to continue</string>
+    <!-- Native-style biometric prompt title, matching what the system UI shows for a system app -->
+    <string name="biometric_verify_title">Verify it\'s you</string>
     <string name="use_pin_button">Use PIN</string>
     <string name="enter_password_to_continue">Enter password to continue</string>
     <string name="biometric_authentication_cd">Biometric Authentication</string>
