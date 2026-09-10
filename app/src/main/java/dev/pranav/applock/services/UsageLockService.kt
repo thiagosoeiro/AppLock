@@ -304,7 +304,7 @@ class UsageLockService: Service() {
     private fun createNotificationChannel() {
         val serviceChannel = NotificationChannel(
             CHANNEL_ID,
-            "AppLock Service (Usage Stats)",
+            getString(R.string.service_notification_channel),
             NotificationManager.IMPORTANCE_DEFAULT
         )
         notificationManager.createNotificationChannel(serviceChannel)
@@ -312,9 +312,9 @@ class UsageLockService: Service() {
 
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("App Lock")
-            .setContentText("Protecting your apps")
-            .setSmallIcon(R.drawable.baseline_shield_24)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.service_notification_text))
+            .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .build()

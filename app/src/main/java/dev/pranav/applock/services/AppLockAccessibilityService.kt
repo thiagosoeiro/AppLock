@@ -32,6 +32,9 @@ class AppLockAccessibilityService : AccessibilityService() {
     private val appLockRepository: AppLockRepository by lazy { applicationContext.appLockRepository() }
     private val keyboardPackages: List<String> by lazy { getKeyboardPackageNames() }
 
+    // Our label as Settings displays it; the anti-uninstall checks match on it, so they follow any rename.
+    private val ownLabel: String by lazy { applicationInfo.loadLabel(packageManager).toString() }
+
     private var lastForegroundPackage = ""
 
     private var overlayManager: LockScreenOverlayManager? = null
@@ -431,12 +434,12 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     private fun isDeactivationAttempt(event: AccessibilityEvent): Boolean {
         val isAccessibilitySettings = event.className in ACCESSIBILITY_SETTINGS_CLASSES &&
-                event.text.any { it.contains("App Lock") }
+                event.text.any { it.contains(ownLabel) }
         val isSubSettings = event.className == "com.android.settings.SubSettings" &&
-                event.text.any { it.contains("App Lock") }
+                event.text.any { it.contains(ownLabel) }
         val isAlertDialog =
             event.packageName == "com.google.android.packageinstaller" && event.className == "android.app.AlertDialog" && event.text.toString()
-                .lowercase().contains("App Lock")
+                .contains(ownLabel)
 
         return isAccessibilitySettings || isSubSettings || isAlertDialog
     }
@@ -477,7 +480,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
                 Toast.makeText(
                     this,
-                    "Disable anti-uninstall from AppLock settings to remove this restriction.",
+                    "This action isn't allowed.",
                     Toast.LENGTH_LONG
                 ).show()
                 Log.w(TAG, "Blocked device admin deactivation attempt.")
