@@ -19,10 +19,12 @@ import androidx.core.content.getSystemService
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.appLockRepository
+import dev.pranav.applock.core.utils.canAuthenticateBiometrics
 import dev.pranav.applock.core.utils.enableAccessibilityServiceWithShizuku
 import dev.pranav.applock.data.repository.AppLockRepository
 import dev.pranav.applock.data.repository.BackendImplementation
 import dev.pranav.applock.features.lockscreen.ui.LockScreenOverlayManager
+import dev.pranav.applock.features.lockscreen.ui.startBiometricPrompt
 import dev.pranav.applock.services.AppLockConstants.ACCESSIBILITY_SETTINGS_CLASSES
 import dev.pranav.applock.services.AppLockConstants.EXCLUDED_APPS
 import rikka.shizuku.Shizuku
@@ -77,6 +79,7 @@ class AppLockAccessibilityService : AccessibilityService() {
             mainHandler = Handler(mainLooper)
 
             overlayManager = LockScreenOverlayManager(this)
+            AppLockManager.lockScreenHost = lockScreenHost
 
             val filter = android.content.IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_OFF)
@@ -327,8 +330,31 @@ class AppLockAccessibilityService : AccessibilityService() {
         showLockScreenOverlay(packageName, triggeringPackage)
     }
 
-    private fun showLockScreenOverlay(packageName: String, triggeringPackage: String) {
-        if (AppLockManager.isLockScreenShown.get()) return
+    /**
+     * Lets the biometric prompt put this service's overlay back up once it is done with it.
+     */
+    private val lockScreenHost = object: AppLockManager.LockScreenHost {
+        override fun showLockScreen(
+            packageName: String,
+            triggeringPackage: String,
+            autoPromptBiometrics: Boolean
+        ) {
+            showLockScreenOverlay(packageName, triggeringPackage, autoPromptBiometrics)
+        }
+
+        override fun hideLockScreen() {
+            mainHandler.post { overlayManager?.removeOverlay() }
+        }
+    }
+
+    private fun showLockScreenOverlay(
+        packageName: String,
+        triggeringPackage: String,
+        autoPromptBiometrics: Boolean = true
+    ) {
+        // A lock screen returning from a cancelled prompt has to get through while the flag is
+        // still set - it is the same lock session, not a second one.
+        if (autoPromptBiometrics && AppLockManager.isLockScreenShown.get()) return
 
         LogUtils.d(TAG, "Showing overlay for: $packageName")
 
@@ -339,16 +365,28 @@ class AppLockAccessibilityService : AccessibilityService() {
                 triggeringPackageName = triggeringPackage,
                 onUnlock = {
                     AppLockManager.isLockScreenShown.set(false)
+                    AppLockManager.reportBiometricAuthFinished()
                     AppLockManager.unlockApp(packageName)
                 },
                 onExit = {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                     Thread.sleep(200)
                     AppLockManager.isLockScreenShown.set(false)
+                    AppLockManager.reportBiometricAuthFinished()
                 }
             )
+
+            // The overlay is up first and stays up until the prompt is on screen, so the locked
+            // app is never briefly visible behind it.
+            if (autoPromptBiometrics && canPromptBiometrics()) {
+                LogUtils.d(TAG, "Auto-prompting biometrics for: $packageName")
+                startBiometricPrompt(packageName, triggeringPackage)
+            }
         }
     }
+
+    private fun canPromptBiometrics(): Boolean =
+        appLockRepository.isBiometricAuthEnabled() && canAuthenticateBiometrics()
 
     //private fun showLockScreenOverlay(packageName: String, triggeringPackage: String) {
     //    LogUtils.d(TAG, "Locked app detected: $packageName. Showing overlay.")
@@ -570,6 +608,7 @@ class AppLockAccessibilityService : AccessibilityService() {
             isServiceRunning = false
             LogUtils.d(TAG, "Accessibility service destroyed")
 
+            AppLockManager.lockScreenHost = null
             overlayManager?.removeOverlay()
 
             try {
