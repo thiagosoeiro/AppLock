@@ -57,7 +57,7 @@ class UsageLockService: Service() {
                     "Screen off detected in Usage Stats fallback. Resetting AppLock state."
                 )
                 AppLockManager.isLockScreenShown.set(false)
-                AppLockManager.clearTemporarilyUnlockedApp()
+                AppLockManager.clearAllUnlockStates()
                 previousForegroundPackage = ""
                 pauseMonitoring = true
             } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
@@ -133,7 +133,7 @@ class UsageLockService: Service() {
         try {
             if (!appLockRepository.isProtectEnabled() || applicationContext.isDeviceLocked()) {
                 if (applicationContext.isDeviceLocked()) {
-                    AppLockManager.appUnlockTimes.clear()
+                    AppLockManager.clearAllUnlockStates()
                     previousForegroundPackage = ""
                 }
                 return
@@ -152,6 +152,14 @@ class UsageLockService: Service() {
             )
 
             if (isExclusionApp(currentPackage)) return
+
+            // A real app taking over ends any pending return - the user went somewhere else
+            // rather than coming back. The held app itself is exempt: that is the return we allow.
+            if (!AppLockManager.isPendingReturn(currentPackage) &&
+                currentPackage !in appLockRepository.getTriggerExcludedApps()
+            ) {
+                AppLockManager.dropPendingReturn()
+            }
 
             if (triggeringPackage in appLockRepository.getTriggerExcludedApps()) {
                 return
@@ -206,6 +214,7 @@ class UsageLockService: Service() {
 
             if (event.className == "com.android.launcher3.uioverrides.QuickstepLauncher" && event.timeStamp != recentAppTime) {
                 recentApp = null
+                AppLockManager.holdUnlockForReturn(AppLockManager.temporarilyUnlockedApp)
                 AppLockManager.clearTemporarilyUnlockedApp()
                 continue
             }
@@ -230,33 +239,14 @@ class UsageLockService: Service() {
         if (packageName !in lockedApps) return
 
         val unlockDurationMinutes = appLockRepository.getUnlockTimeDuration()
-        val unlockTimestamp = AppLockManager.appUnlockTimes[packageName] ?: 0L
 
         LogUtils.d(
             TAG,
-            "checkAndLockApp: pkg=$packageName, duration=$unlockDurationMinutes min, unlockTime=$unlockTimestamp, currentTime=$currentTime, isLockScreenShown=${AppLockManager.isLockScreenShown.get()}"
+            "checkAndLockApp: pkg=$packageName, duration=$unlockDurationMinutes min, currentTime=$currentTime, isLockScreenShown=${AppLockManager.isLockScreenShown.get()}"
         )
 
-        if (unlockDurationMinutes > 0 && unlockTimestamp > 0) {
-            if (unlockDurationMinutes >= 10_000) {
-                return
-            }
-
-            val durationMillis = unlockDurationMinutes.toLong() * 60_000L
-
-            val elapsedMillis = currentTime - unlockTimestamp
-
-            LogUtils.d(
-                TAG,
-                "Grace period check: elapsed=${elapsedMillis}ms (${elapsedMillis / 1000}s), duration=${durationMillis}ms (${durationMillis / 1000}s)"
-            )
-
-            if (elapsedMillis < durationMillis) {
-                return
-            }
-
-            LogUtils.d(TAG, "Unlock grace period expired for $packageName. Clearing timestamp.")
-            AppLockManager.appUnlockTimes.remove(packageName)
+        if (!AppLockManager.shouldShowLockScreen(packageName, currentTime, unlockDurationMinutes)) {
+            return
         }
 
         if (AppLockManager.isLockScreenShown.get() || AppLockManager.currentBiometricState.toString() == biometricAuthStarted) {

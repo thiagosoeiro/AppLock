@@ -30,6 +30,7 @@ class ShizukuAppLockService : Service() {
     private val appLockRepository: AppLockRepository by lazy { applicationContext.appLockRepository() }
     private var shizukuActivityManager: ShizukuActivityManager? = null
     private var previousForegroundPackage = ""
+    private val launcherPackage: String by lazy { applicationContext.defaultLauncherPackageName() }
 
     private val notificationManager: NotificationManager by lazy {
         getSystemService(NotificationManager::class.java)
@@ -187,6 +188,22 @@ class ShizukuAppLockService : Service() {
                     return@ShizukuActivityManager
                 }
 
+                // The launcher draws home and recents; landing there is not the same as opening
+                // another app, so the unlock is held for a short return window instead of dropped.
+                val isNeutral = packageName == launcherPackage
+                if (packageName !in triggerExclusions) {
+                    val unlockedApp = AppLockManager.temporarilyUnlockedApp
+                    if (unlockedApp.isNotEmpty() && unlockedApp != packageName) {
+                        if (isNeutral) {
+                            AppLockManager.holdUnlockForReturn(unlockedApp)
+                        }
+                        AppLockManager.clearTemporarilyUnlockedApp()
+                    }
+                    if (!isNeutral && !AppLockManager.isPendingReturn(packageName)) {
+                        AppLockManager.dropPendingReturn()
+                    }
+                }
+
                 LogUtils.d(TAG, "Current package=$packageName, trigger=$triggeringPackage")
                 checkAndLockApp(packageName, triggeringPackage, timeMillis)
             }
@@ -198,33 +215,14 @@ class ShizukuAppLockService : Service() {
         if (packageName !in lockedApps) return
 
         val unlockDurationMinutes = appLockRepository.getUnlockTimeDuration()
-        val unlockTimestamp = AppLockManager.appUnlockTimes[packageName] ?: 0L
 
         LogUtils.d(
             TAG,
-            "checkAndLockApp: pkg=$packageName, duration=$unlockDurationMinutes min, unlockTime=$unlockTimestamp, currentTime=$currentTime, isLockScreenShown=${AppLockManager.isLockScreenShown.get()}"
+            "checkAndLockApp: pkg=$packageName, duration=$unlockDurationMinutes min, currentTime=$currentTime, isLockScreenShown=${AppLockManager.isLockScreenShown.get()}"
         )
 
-        if (unlockDurationMinutes > 0 && unlockTimestamp > 0) {
-            if (unlockDurationMinutes >= 10_000) {
-                return
-            }
-
-            val durationMillis = unlockDurationMinutes.toLong() * 60_000L
-
-            val elapsedMillis = currentTime - unlockTimestamp
-
-            LogUtils.d(
-                TAG,
-                "Grace period check: elapsed=${elapsedMillis}ms (${elapsedMillis / 1000}s), duration=${durationMillis}ms (${durationMillis / 1000}s)"
-            )
-
-            if (elapsedMillis < durationMillis) {
-                return
-            }
-
-            LogUtils.d(TAG, "Unlock grace period expired for $packageName. Clearing timestamp.")
-            AppLockManager.appUnlockTimes.remove(packageName)
+        if (!AppLockManager.shouldShowLockScreen(packageName, currentTime, unlockDurationMinutes)) {
+            return
         }
 
         if (AppLockManager.isLockScreenShown.get()) {

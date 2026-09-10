@@ -4,6 +4,8 @@ import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.services.AppLockAccessibilityService.BiometricState
 import java.util.concurrent.ConcurrentHashMap
@@ -42,6 +44,36 @@ fun Context.isDeviceLocked(): Boolean {
     return keyguardManager?.isKeyguardLocked ?: false
 }
 
+/**
+ * The system launcher's package, or "" if it cannot be resolved. Shared by the backends that need
+ * to tell "the user went home or opened recents" apart from "the user opened another app".
+ */
+fun Context.defaultLauncherPackageName(): String {
+    return try {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+        }
+
+        val resolveInfoList = packageManager.queryIntentActivities(
+            homeIntent,
+            PackageManager.MATCH_DEFAULT_ONLY
+        )
+
+        val systemLauncher = resolveInfoList.find { resolveInfo ->
+            val isSystemApp = (resolveInfo.activityInfo.applicationInfo.flags and
+                    ApplicationInfo.FLAG_SYSTEM) != 0
+            val isOurApp = resolveInfo.activityInfo.packageName == packageName
+
+            isSystemApp && !isOurApp
+        }
+
+        systemLauncher?.activityInfo?.packageName ?: ""
+    } catch (e: Exception) {
+        LogUtils.e("AppLockManager", "Error getting system default launcher package", e)
+        ""
+    }
+}
+
 @Suppress("DEPRECATION")
 fun Context.isServiceRunning(serviceClass: Class<*>): Boolean {
     val manager = getSystemService(ActivityManager::class.java) ?: return false
@@ -75,34 +107,119 @@ object AppLockManager {
     @Volatile
     var lockScreenHost: LockScreenHost? = null
 
-    // Grace period tracking
-    private var recentlyLeftApp: String = ""
-    private var recentlyLeftTime: Long = 0L
-    private const val GRACE_PERIOD_MS = 300L
+    /**
+     * How long an app keeps its unlock after being backgrounded for a neutral surface - the
+     * launcher, recents, or a system window. Returning to the same app inside this window is
+     * treated as never having left it, which is what makes "Lock immediately" bearable without
+     * making it meaningless: hand the phone to someone else and the window has almost always
+     * already expired.
+     */
+    private const val RETURN_GRACE_PERIOD_MS = 5_000L
 
-    fun setRecentlyLeftApp(packageName: String) {
-        recentlyLeftApp = packageName
-        recentlyLeftTime = System.currentTimeMillis()
-        LogUtils.d(TAG, "Left app $packageName at $recentlyLeftTime")
+    /**
+     * Unlock durations at or above this are the "Until Screen Off" option rather than a real
+     * number of minutes. Screen-off wipes [appUnlockTimes], so the timestamp alone carries it.
+     */
+    private const val UNTIL_SCREEN_OFF_THRESHOLD = 10_000
+
+    private var pendingReturnApp: String = ""
+    private var pendingReturnSince: Long = 0L
+
+    /**
+     * Records that [packageName] was backgrounded for a neutral surface and may come straight
+     * back. Only the caller can tell a neutral surface from a real app switch, so this must not
+     * be called when the user actually opened something else - use [dropPendingReturn] there.
+     */
+    fun holdUnlockForReturn(packageName: String) {
+        if (packageName.isEmpty()) return
+        pendingReturnApp = packageName
+        pendingReturnSince = System.currentTimeMillis()
+        LogUtils.d(TAG, "Holding unlock for $packageName, returnable until +${RETURN_GRACE_PERIOD_MS}ms")
     }
 
-    fun checkAndRestoreRecentlyLeftApp(packageName: String): Boolean {
-        // If we are returning to the same app we just left within the grace period
-        if (packageName == recentlyLeftApp && packageName.isNotEmpty()) {
-            val elapsed = System.currentTimeMillis() - recentlyLeftTime
-            if (elapsed <= GRACE_PERIOD_MS) {
-                LogUtils.d(TAG, "Restoring unlock state for $packageName (elapsed: ${elapsed}ms)")
-                temporarilyUnlockedApp = packageName
-                // Clear the tracking so it doesn't trigger again inappropriately
-                recentlyLeftApp = ""
-                recentlyLeftTime = 0L
-                return true
-            } else {
-                LogUtils.d(TAG, "Grace period expired for $packageName (elapsed: ${elapsed}ms)")
-                recentlyLeftApp = "" // Expired
-            }
+    /**
+     * Abandons any pending return. Called once a different app really has the foreground, so the
+     * window cannot survive an app switch and let the user bounce back in.
+     */
+    fun dropPendingReturn() {
+        if (pendingReturnApp.isEmpty()) return
+        LogUtils.d(TAG, "Dropping pending return for $pendingReturnApp")
+        pendingReturnApp = ""
+        pendingReturnSince = 0L
+    }
+
+    /**
+     * Whether [packageName] is the app currently being held for a return. Lets callers leave the
+     * hold alone when the held app itself comes back, without consuming it.
+     */
+    fun isPendingReturn(packageName: String): Boolean =
+        packageName.isNotEmpty() && packageName == pendingReturnApp
+
+    /**
+     * Restores the unlock if [packageName] is the app we are holding and the window has not
+     * expired. Consumes the hold either way, so it can never fire twice.
+     */
+    fun consumeReturnGrace(packageName: String, now: Long): Boolean {
+        if (packageName.isEmpty() || packageName != pendingReturnApp) return false
+
+        val elapsed = now - pendingReturnSince
+        pendingReturnApp = ""
+        pendingReturnSince = 0L
+
+        if (elapsed !in 0..RETURN_GRACE_PERIOD_MS) {
+            LogUtils.d(TAG, "Return grace expired for $packageName (elapsed: ${elapsed}ms)")
+            return false
         }
-        return false
+
+        LogUtils.d(TAG, "Restoring unlock for $packageName (elapsed: ${elapsed}ms)")
+        temporarilyUnlockedApp = packageName
+        return true
+    }
+
+    /**
+     * The single answer to "should the lock screen come up for this app right now", shared by all
+     * three backends so they cannot drift apart.
+     *
+     * Deliberately does not consider whether the app is locked at all, whether a lock screen is
+     * already showing, or whether biometrics are mid-prompt - those are the caller's to check.
+     */
+    fun shouldShowLockScreen(
+        packageName: String,
+        now: Long,
+        unlockDurationMinutes: Int
+    ): Boolean {
+        if (isAppTemporarilyUnlocked(packageName)) return false
+
+        if (consumeReturnGrace(packageName, now)) return false
+
+        val unlockTimestamp = appUnlockTimes[packageName] ?: 0L
+
+        if (unlockDurationMinutes > 0 && unlockTimestamp > 0L) {
+            if (unlockDurationMinutes >= UNTIL_SCREEN_OFF_THRESHOLD) {
+                temporarilyUnlockedApp = packageName
+                return false
+            }
+
+            val durationMillis = unlockDurationMinutes.toLong() * 60L * 1000L
+            val elapsedMillis = now - unlockTimestamp
+
+            LogUtils.d(
+                TAG,
+                "Grace period check for $packageName: elapsed=${elapsedMillis}ms, duration=${durationMillis}ms"
+            )
+
+            if (elapsedMillis < durationMillis) {
+                // Re-adopt the app, otherwise the manager believes nothing is unlocked while it
+                // sits in the foreground and never holds the unlock on the next switch away.
+                temporarilyUnlockedApp = packageName
+                return false
+            }
+
+            LogUtils.d(TAG, "Unlock duration expired for $packageName")
+        }
+
+        clearAppUnlockState(packageName)
+        return true
     }
 
     private val ALL_APP_LOCK_SERVICES = setOf(
@@ -146,8 +263,8 @@ object AppLockManager {
     fun clearAllUnlockStates() {
         temporarilyUnlockedApp = ""
         appUnlockTimes.clear()
-        recentlyLeftApp = ""
-        recentlyLeftTime = 0L
+        pendingReturnApp = ""
+        pendingReturnSince = 0L
         LogUtils.d(TAG, "Cleared all unlock states")
     }
 
@@ -156,9 +273,9 @@ object AppLockManager {
             temporarilyUnlockedApp = ""
         }
         appUnlockTimes.remove(packageName)
-        if (packageName == recentlyLeftApp) {
-            recentlyLeftApp = ""
-            recentlyLeftTime = 0L
+        if (packageName == pendingReturnApp) {
+            pendingReturnApp = ""
+            pendingReturnSince = 0L
         }
         LogUtils.d(TAG, "Cleared stale unlock state for $packageName")
     }
