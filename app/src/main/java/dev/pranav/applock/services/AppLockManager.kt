@@ -57,6 +57,24 @@ object AppLockManager {
     val isLockScreenShown = AtomicBoolean(false)
     var currentBiometricState: AppLockAccessibilityService.BiometricState? = null
 
+    /**
+     * Lets the biometric prompt hand control of the lock screen back and forth with whichever
+     * service is showing it. Registered by [AppLockAccessibilityService] while it is alive; null
+     * when another backend is in charge, since those draw their lock screen as an activity.
+     */
+    interface LockScreenHost {
+        fun showLockScreen(
+            packageName: String,
+            triggeringPackage: String,
+            autoPromptBiometrics: Boolean
+        )
+
+        fun hideLockScreen()
+    }
+
+    @Volatile
+    var lockScreenHost: LockScreenHost? = null
+
     // Grace period tracking
     private var recentlyLeftApp: String = ""
     private var recentlyLeftTime: Long = 0L

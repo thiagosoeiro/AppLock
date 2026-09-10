@@ -10,6 +10,7 @@ import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.biometric.BiometricManager
 import androidx.core.net.toUri
 import dev.pranav.applock.AppLockApplication
 import dev.pranav.applock.data.repository.AppLockRepository
@@ -115,3 +116,13 @@ private const val DEFAULT_VIBRATION_DURATION = 500L
  */
 fun Context.appLockRepository(): AppLockRepository =
     (applicationContext as AppLockApplication).appLockRepository
+
+/**
+ * Whether the device can actually authenticate the user right now - biometric hardware is present,
+ * available and something is enrolled.
+ */
+fun Context.canAuthenticateBiometrics(): Boolean =
+    BiometricManager.from(this).canAuthenticate(
+        BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                BiometricManager.Authenticators.BIOMETRIC_STRONG
+    ) == BiometricManager.BIOMETRIC_SUCCESS

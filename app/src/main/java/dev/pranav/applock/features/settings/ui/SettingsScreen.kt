@@ -12,7 +12,6 @@ import android.os.PersistableBundle
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.biometric.BiometricManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -49,6 +48,7 @@ import dev.pranav.applock.core.broadcast.AutomationReceiver
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.utils.LogUtils
+import dev.pranav.applock.core.utils.canAuthenticateBiometrics
 import dev.pranav.applock.core.utils.hasUsagePermission
 import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
 import dev.pranav.applock.core.utils.openAccessibilitySettings
@@ -107,13 +107,7 @@ fun SettingsScreen(
     var showDeviceAdminDialog by remember { mutableStateOf(false) }
     var showAccessibilityDialog by remember { mutableStateOf(false) }
 
-    val biometricManager = remember { BiometricManager.from(context) }
-    val isBiometricAvailable = remember {
-        biometricManager.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_WEAK or
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG
-        ) == BiometricManager.BIOMETRIC_SUCCESS
-    }
+    val isBiometricAvailable = remember { context.canAuthenticateBiometrics() }
 
     if (showDialog) {
         AlertDialog(
