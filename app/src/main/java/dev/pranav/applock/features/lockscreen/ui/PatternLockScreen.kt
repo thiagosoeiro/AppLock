@@ -54,6 +54,11 @@ fun PatternLockScreen(
             var showError by remember { mutableStateOf(false) }
             val lockoutSeconds = rememberLockoutSeconds()
 
+            // Start and end a wait with no leftover "Incorrect pattern".
+            LaunchedEffect(lockoutSeconds > 0L) {
+                showError = false
+            }
+
             @Suppress("ASSIGNED_BUT_NOT_ACCESSED_WARNING")
             var errorShakeOffset by remember { mutableStateOf(0f) }
 

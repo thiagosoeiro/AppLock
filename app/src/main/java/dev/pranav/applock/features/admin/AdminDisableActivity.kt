@@ -276,8 +276,12 @@ fun AdminDisablePasswordScreen(
         val focusRequester = remember { FocusRequester() }
         val lockoutSeconds = rememberLockoutSeconds()
 
-        LaunchedEffect(Unit) {
-            focusRequester.requestFocus()
+        // Clear the field on open and whenever a wait starts or ends, and focus it once no wait is
+        // running: disabling it for the wait drops focus and closes the keyboard.
+        LaunchedEffect(lockoutSeconds > 0L) {
+            passwordState = ""
+            showError = false
+            if (lockoutSeconds == 0L) focusRequester.requestFocus()
         }
 
         Column(

@@ -73,12 +73,16 @@ fun AlphanumericPasswordOverlayScreen(
 
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
-
     val minLength = 4
     val lockoutSeconds = rememberLockoutSeconds()
+
+    // Clear the field on open and whenever a wait starts or ends, and focus it once no wait is
+    // running: disabling it for the wait drops focus and closes the keyboard.
+    LaunchedEffect(lockoutSeconds > 0L) {
+        passwordState = ""
+        showError = false
+        if (lockoutSeconds == 0L) focusRequester.requestFocus()
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
