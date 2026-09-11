@@ -1,7 +1,6 @@
 package dev.pranav.applock.core.broadcast
 
 import android.app.admin.DeviceAdminReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
@@ -12,15 +11,15 @@ class DeviceAdmin : DeviceAdminReceiver() {
         private const val KEY_PASSWORD_VERIFIED = "password_verified"
     }
 
+    /**
+     * An active admin is itself what blocks uninstalling the app. Don't call setUninstallBlocked
+     * here: only a device or profile owner may, so it throws and crashes the app.
+     */
     override fun onEnabled(context: Context, intent: android.content.Intent) {
         super.onEnabled(context, intent)
-        context.getSharedPreferences("app_lock_settings", Context.MODE_PRIVATE).edit {
+        context.getSharedPreferences("app_lock_settings", Context.MODE_PRIVATE).edit(commit = true) {
             putBoolean("anti_uninstall", true)
         }
-
-        val component = ComponentName(context, DeviceAdmin::class.java)
-
-        getManager(context).setUninstallBlocked(component, context.packageName, true)
     }
 
     override fun onDisabled(context: Context, intent: android.content.Intent) {
