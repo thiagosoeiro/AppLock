@@ -57,16 +57,21 @@ object SecurityUtils {
      * Format: salt:hash
      */
     fun hashPassword(password: String, salt: ByteArray): String {
-        val sanitizedPassword = sanitizePassword(password)
-
-        val md = MessageDigest.getInstance(HASH_ALGORITHM)
-        md.update(salt)
-        val hash = md.digest(sanitizedPassword.toByteArray(Charsets.UTF_8))
+        val hash = saltedDigest(password, salt)
 
         val saltBase64 = Base64.encodeToString(salt, Base64.NO_WRAP)
         val hashBase64 = Base64.encodeToString(hash, Base64.NO_WRAP)
 
         return "$saltBase64:$hashBase64"
+    }
+
+    /**
+     * SHA-256 of the salt followed by the sanitized password: the hash inside `salt:hash`.
+     */
+    fun saltedDigest(password: String, salt: ByteArray): ByteArray {
+        val md = MessageDigest.getInstance(HASH_ALGORITHM)
+        md.update(salt)
+        return md.digest(sanitizePassword(password).toByteArray(Charsets.UTF_8))
     }
 
     fun isSaltedHash(value: String): Boolean {
@@ -93,13 +98,7 @@ object SecurityUtils {
             val salt = Base64.decode(parts[0], Base64.NO_WRAP)
             val expectedHash = Base64.decode(parts[1], Base64.NO_WRAP)
 
-            val sanitizedInput = sanitizePassword(inputPassword)
-
-            val md = MessageDigest.getInstance(HASH_ALGORITHM)
-            md.update(salt)
-            val actualHash = md.digest(sanitizedInput.toByteArray(Charsets.UTF_8))
-
-            MessageDigest.isEqual(actualHash, expectedHash)
+            MessageDigest.isEqual(saltedDigest(inputPassword, salt), expectedHash)
         } catch (_: Exception) {
             false
         }

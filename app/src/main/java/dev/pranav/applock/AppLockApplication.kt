@@ -25,6 +25,13 @@ class AppLockApplication : Application() {
         super.onCreate()
         initializeComponents()
 
+        // Bring stored credentials up to the current format before any lock screen checks them.
+        try {
+            appLockRepository.upgradeStoredCredentials()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to upgrade stored credentials", e)
+        }
+
         LogUtils.initialize(this)
         LogUtils.setLoggingEnabled(appLockRepository.isLoggingEnabled())
 
