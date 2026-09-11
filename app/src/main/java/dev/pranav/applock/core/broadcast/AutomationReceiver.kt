@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.SecurityUtils
 import dev.pranav.applock.core.utils.appLockRepository
-import dev.pranav.applock.data.repository.AppLockRepository
 import dev.pranav.applock.services.AppLockManager
 
 /**
@@ -47,8 +46,8 @@ class AutomationReceiver : BroadcastReceiver() {
         }
 
         when (action) {
-            ACTION_ENABLE_PROTECTION -> setProtection(context, repository, true)
-            ACTION_DISABLE_PROTECTION -> setProtection(context, repository, false)
+            ACTION_ENABLE_PROTECTION -> setProtection(context, true)
+            ACTION_DISABLE_PROTECTION -> setProtection(context, false)
             ACTION_QUERY_STATE -> LogUtils.d(TAG, "State queried via automation")
             else -> {
                 reject(context, "unknown action", action)
@@ -59,23 +58,6 @@ class AutomationReceiver : BroadcastReceiver() {
         val enabled = repository.isProtectEnabled()
         reportResult(if (enabled) RESULT_PROTECTION_ON else RESULT_PROTECTION_OFF, enabled.toString())
         notifyStateChanged(context, enabled)
-    }
-
-    private fun setProtection(context: Context, repository: AppLockRepository, enabled: Boolean) {
-        repository.setProtectEnabled(enabled)
-
-        if (enabled) {
-            // Fail closed: an app unlocked while protection was off must not stay unlocked once
-            // protection comes back, and the backend service may have been stopped meanwhile.
-            AppLockManager.clearAllUnlockStates()
-            try {
-                AppLockServiceStarter.startAppropriateServices(context, repository)
-            } catch (e: Exception) {
-                LogUtils.e(TAG, "Failed to start services after enabling protection", e)
-            }
-        }
-
-        LogUtils.d(TAG, "Protection set to $enabled via automation")
     }
 
     private fun reject(context: Context, reason: String, action: String?) {
@@ -109,6 +91,28 @@ class AutomationReceiver : BroadcastReceiver() {
         const val RESULT_REJECTED = 0
         const val RESULT_PROTECTION_OFF = 1
         const val RESULT_PROTECTION_ON = 2
+
+        /**
+         * Switches protection on or off. The shield toggle on the main screen and automation both
+         * go through here, so turning protection back on re-locks apps the same way from either.
+         */
+        fun setProtection(context: Context, enabled: Boolean) {
+            val repository = context.appLockRepository()
+            repository.setProtectEnabled(enabled)
+
+            if (enabled) {
+                // Fail closed: an app unlocked while protection was off must not stay unlocked once
+                // protection comes back, and the backend service may have been stopped meanwhile.
+                AppLockManager.clearAllUnlockStates()
+                try {
+                    AppLockServiceStarter.startAppropriateServices(context, repository)
+                } catch (e: Exception) {
+                    LogUtils.e(TAG, "Failed to start services after enabling protection", e)
+                }
+            }
+
+            LogUtils.d(TAG, "Protection set to $enabled")
+        }
 
         /**
          * Announces the current protection state. Sent implicitly so automation apps can pick it
