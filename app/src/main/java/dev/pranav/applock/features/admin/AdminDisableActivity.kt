@@ -34,6 +34,8 @@ import dev.pranav.applock.data.repository.PreferencesRepository
 import dev.pranav.applock.features.lockscreen.ui.KeypadSection
 import dev.pranav.applock.features.lockscreen.ui.PasswordIndicators
 import dev.pranav.applock.features.lockscreen.ui.PatternLockScreen
+import dev.pranav.applock.features.lockscreen.ui.lockoutMessage
+import dev.pranav.applock.features.lockscreen.ui.rememberLockoutSeconds
 import dev.pranav.applock.ui.theme.AppLockTheme
 
 class AdminDisableActivity : ComponentActivity() {
@@ -195,6 +197,7 @@ fun AdminDisableScreen(
     ) {
         val passwordState = remember { mutableStateOf("") }
         val showError = remember { mutableStateOf(false) }
+        val lockoutSeconds = rememberLockoutSeconds()
 
         Column(
             modifier = Modifier
@@ -217,9 +220,13 @@ fun AdminDisableScreen(
                 passwordLength = passwordState.value.length
             )
 
-            if (showError.value) {
+            if (lockoutSeconds > 0L || showError.value) {
                 Text(
-                    text = stringResource(R.string.incorrect_pin_try_again),
+                    text = if (lockoutSeconds > 0L) {
+                        lockoutMessage(lockoutSeconds)
+                    } else {
+                        stringResource(R.string.incorrect_pin_try_again)
+                    },
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = 8.dp)
@@ -231,6 +238,7 @@ fun AdminDisableScreen(
             KeypadSection(
                 passwordState = passwordState,
                 minLength = 4,
+                enabled = lockoutSeconds == 0L,
                 showBiometricButton = false,
                 fromMainActivity = false,
                 onBiometricAuth = {},
@@ -266,9 +274,14 @@ fun AdminDisablePasswordScreen(
         var showError by remember { mutableStateOf(false) }
         var passwordVisible by remember { mutableStateOf(false) }
         val focusRequester = remember { FocusRequester() }
+        val lockoutSeconds = rememberLockoutSeconds()
 
-        LaunchedEffect(Unit) {
-            focusRequester.requestFocus()
+        // Clear the field on open and whenever a wait starts or ends, and focus it once no wait is
+        // running: disabling it for the wait drops focus and closes the keyboard.
+        LaunchedEffect(lockoutSeconds > 0L) {
+            passwordState = ""
+            showError = false
+            if (lockoutSeconds == 0L) focusRequester.requestFocus()
         }
 
         Column(
@@ -293,6 +306,7 @@ fun AdminDisablePasswordScreen(
                     showError = false
                 },
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                enabled = lockoutSeconds == 0L,
                 label = { Text(stringResource(R.string.password_hint)) },
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
@@ -312,9 +326,13 @@ fun AdminDisablePasswordScreen(
                 singleLine = true
             )
 
-            if (showError) {
+            if (lockoutSeconds > 0L || showError) {
                 Text(
-                    text = stringResource(R.string.incorrect_password_try_again),
+                    text = if (lockoutSeconds > 0L) {
+                        lockoutMessage(lockoutSeconds)
+                    } else {
+                        stringResource(R.string.incorrect_password_try_again)
+                    },
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(top = 4.dp).align(Alignment.Start)
@@ -343,7 +361,8 @@ fun AdminDisablePasswordScreen(
                             passwordState = ""
                         }
                     },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    enabled = lockoutSeconds == 0L
                 ) {
                     Text(stringResource(R.string.verify_button))
                 }

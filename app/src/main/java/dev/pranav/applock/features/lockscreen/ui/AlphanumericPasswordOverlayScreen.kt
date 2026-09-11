@@ -73,11 +73,16 @@ fun AlphanumericPasswordOverlayScreen(
 
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
-
     val minLength = 4
+    val lockoutSeconds = rememberLockoutSeconds()
+
+    // Clear the field on open and whenever a wait starts or ends, and focus it once no wait is
+    // running: disabling it for the wait drops focus and closes the keyboard.
+    LaunchedEffect(lockoutSeconds > 0L) {
+        passwordState = ""
+        showError = false
+        if (lockoutSeconds == 0L) focusRequester.requestFocus()
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -129,6 +134,7 @@ fun AlphanumericPasswordOverlayScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester),
+                    enabled = lockoutSeconds == 0L,
                     label = { Text(stringResource(R.string.password_hint)) },
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
@@ -165,9 +171,13 @@ fun AlphanumericPasswordOverlayScreen(
                     singleLine = true
                 )
 
-                if (showError) {
+                if (lockoutSeconds > 0L || showError) {
                     Text(
-                        text = stringResource(R.string.incorrect_password_try_again),
+                        text = if (lockoutSeconds > 0L) {
+                            lockoutMessage(lockoutSeconds)
+                        } else {
+                            stringResource(R.string.incorrect_password_try_again)
+                        },
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier
@@ -215,6 +225,7 @@ fun AlphanumericPasswordOverlayScreen(
                             }
                         },
                         modifier = Modifier.weight(1f),
+                        enabled = lockoutSeconds == 0L,
                         shapes = ButtonDefaults.shapes()
                     ) {
                         Text(stringResource(R.string.verify_button))

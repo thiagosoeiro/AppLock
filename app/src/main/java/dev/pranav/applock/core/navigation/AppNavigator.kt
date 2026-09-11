@@ -18,6 +18,7 @@ import androidx.navigation.compose.composable
 import dev.pranav.applock.AppLockApplication
 import dev.pranav.applock.R
 import dev.pranav.applock.core.utils.LogUtils
+import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.data.repository.PreferencesRepository
 import dev.pranav.applock.features.antiuninstall.ui.AntiUninstallScreen
 import dev.pranav.applock.features.appintro.ui.AppIntroScreen
@@ -180,6 +181,7 @@ private fun handleBiometricAuthentication(
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
                     LogUtils.d(TAG, "Biometric authentication succeeded")
+                    context.appLockRepository().clearFailedAttempts()
                     navigateToMain(navController)
                 }
 

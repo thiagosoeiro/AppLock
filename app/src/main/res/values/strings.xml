@@ -9,6 +9,7 @@
 
     <string name="unlock_to_disable_admin">Enter your password to disable admin permission.</string>
     <string name="incorrect_pin_try_again">Incorrect PIN. Please try again.</string>
+    <string name="too_many_attempts_try_again_in">Too many attempts. Try again in %1$s</string>
     <string name="incorrect_pass_try_again">Incorrect password. Please try again.</string>
     <string name="password_verified_admin">Password verified, you can now disable admin permission</string>
     <string name="choose_app_detection">Choose App Detection Method</string>

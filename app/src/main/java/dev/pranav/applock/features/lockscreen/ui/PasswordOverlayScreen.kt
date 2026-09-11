@@ -268,6 +268,7 @@ class PasswordOverlayActivity: FragmentActivity() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 super.onAuthenticationSucceeded(result)
                 isBiometricPromptShowingLocal = false
+                appLockRepository.clearFailedAttempts()
                 lockedPackageNameFromIntent?.let { pkgName ->
                     AppLockManager.temporarilyUnlockAppWithBiometrics(pkgName)
                     // Fix: Do NOT relaunch the app. Just finish the overlay to reveal the underlying activity.
@@ -392,6 +393,31 @@ fun PinPasswordOverlayScreen(
             val passwordState = remember { mutableStateOf("") }
             var showError by remember { mutableStateOf(false) }
             val minLength = 4
+            val lockoutSeconds = rememberLockoutSeconds()
+
+            // Start and end a wait with an empty PIN and no leftover "Incorrect PIN".
+            LaunchedEffect(lockoutSeconds > 0L) {
+                passwordState.value = ""
+                showError = false
+            }
+
+            // Auto Unlock checks the PIN only once it has as many digits as the real one: every
+            // wrong check counts towards the lockout, so checking each digit would count the user's
+            // own typing. Until the length is known, Auto Unlock waits for the proceed key.
+            val onPasswordChange: () -> Unit = {
+                showError = false
+
+                if (appLockRepository.isAutoUnlockEnabled() &&
+                    passwordState.value.length == appLockRepository.getPinLength()
+                ) {
+                    onPinAttempt?.let { attempt ->
+                        if (!attempt(passwordState.value)) {
+                            passwordState.value = ""
+                            showError = true
+                        }
+                    }
+                }
+            }
 
             if (isLandscape) {
                 Row(
@@ -433,10 +459,14 @@ fun PinPasswordOverlayScreen(
                             passwordLength = passwordState.value.length,
                         )
 
-                        if (showError) {
+                        if (lockoutSeconds > 0L || showError) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = stringResource(R.string.incorrect_pin_try_again),
+                                text = if (lockoutSeconds > 0L) {
+                                    lockoutMessage(lockoutSeconds)
+                                } else {
+                                    stringResource(R.string.incorrect_pin_try_again)
+                                },
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
@@ -450,18 +480,13 @@ fun PinPasswordOverlayScreen(
                         KeypadSection(
                             passwordState = passwordState,
                             minLength = minLength,
+                            enabled = lockoutSeconds == 0L,
                             showBiometricButton = showBiometricButton,
                             fromMainActivity = fromMainActivity,
                             onBiometricAuth = onBiometricAuth,
                             onAuthSuccess = onAuthSuccess,
                             onPinAttempt = onPinAttempt,
-                            onPasswordChange = {
-                                showError = false
-
-                                if (appLockRepository.isAutoUnlockEnabled()) {
-                                    onPinAttempt?.invoke(passwordState.value)
-                                }
-                            },
+                            onPasswordChange = onPasswordChange,
                             onPinIncorrect = { showError = true }
                         )
                     }
@@ -505,9 +530,13 @@ fun PinPasswordOverlayScreen(
                         passwordLength = passwordState.value.length,
                     )
 
-                    if (showError) {
+                    if (lockoutSeconds > 0L || showError) {
                         Text(
-                            text = stringResource(R.string.incorrect_pin_try_again),
+                            text = if (lockoutSeconds > 0L) {
+                                lockoutMessage(lockoutSeconds)
+                            } else {
+                                stringResource(R.string.incorrect_pin_try_again)
+                            },
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(top = 8.dp)
@@ -519,18 +548,13 @@ fun PinPasswordOverlayScreen(
                     KeypadSection(
                         passwordState = passwordState,
                         minLength = minLength,
+                        enabled = lockoutSeconds == 0L,
                         showBiometricButton = showBiometricButton,
                         fromMainActivity = fromMainActivity,
                         onBiometricAuth = onBiometricAuth,
                         onAuthSuccess = onAuthSuccess,
                         onPinAttempt = onPinAttempt,
-                        onPasswordChange = {
-                            showError = false
-
-                            if (appLockRepository.isAutoUnlockEnabled()) {
-                                onPinAttempt?.invoke(passwordState.value)
-                            }
-                        },
+                        onPasswordChange = onPasswordChange,
                         onPinIncorrect = { showError = true }
                     )
                 }
@@ -685,6 +709,7 @@ fun PasswordIndicators(
 fun KeypadSection(
     passwordState: MutableState<String>,
     minLength: Int,
+    enabled: Boolean = true,
     showBiometricButton: Boolean,
     fromMainActivity: Boolean = false,
     onBiometricAuth: () -> Unit,
@@ -832,6 +857,7 @@ fun KeypadSection(
         }
         KeypadRow(
             disableHaptics = disableHaptics,
+            enabled = enabled,
             keys = listOf("1", "2", "3"),
             onKeyClick = onDigitKeyClick,
             buttonSize = buttonSize,
@@ -839,6 +865,7 @@ fun KeypadSection(
         )
         KeypadRow(
             disableHaptics = disableHaptics,
+            enabled = enabled,
             keys = listOf("4", "5", "6"),
             onKeyClick = onDigitKeyClick,
             buttonSize = buttonSize,
@@ -846,6 +873,7 @@ fun KeypadSection(
         )
         KeypadRow(
             disableHaptics = disableHaptics,
+            enabled = enabled,
             keys = listOf("7", "8", "9"),
             onKeyClick = onDigitKeyClick,
             buttonSize = buttonSize,
@@ -853,6 +881,7 @@ fun KeypadSection(
         )
         KeypadRow(
             disableHaptics = disableHaptics,
+            enabled = enabled,
             keys = listOf("backspace", "0", "proceed"),
             icons = listOf(Backspace, null, Icons.AutoMirrored.Rounded.KeyboardArrowRight),
             onKeyClick = onSpecialKeyClick,
@@ -938,6 +967,7 @@ private fun handleKeypadSpecialButtonLogic(
 @Composable
 fun KeypadRow(
     disableHaptics: Boolean = false,
+    enabled: Boolean = true,
     keys: List<String>,
     icons: List<ImageVector?> = emptyList(),
     onKeyClick: (String) -> Unit,
@@ -984,6 +1014,7 @@ fun KeypadRow(
                     onKeyClick(key)
                 },
                 modifier = Modifier.size(buttonSize),
+                enabled = enabled,
                 interactionSource = interactionSource,
                 shapes = ButtonShapes(
                     shape = CircleShape,

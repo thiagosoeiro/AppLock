@@ -48,6 +48,8 @@ import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.navigation.finishPasswordSetup
 import dev.pranav.applock.core.utils.vibrate
 import dev.pranav.applock.data.repository.PreferencesRepository
+import dev.pranav.applock.features.lockscreen.ui.getLockoutMessage
+import dev.pranav.applock.features.lockscreen.ui.lockoutSeconds
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -145,7 +147,17 @@ fun PatternSetPasswordScreen(
                     patternState = ""
                     showInvalidOldPasswordError = false
                 } else {
-                    showInvalidOldPasswordError = true
+                    // Nothing is checked during a wait, so say that instead.
+                    val lockoutSeconds = appLockRepository.lockoutSeconds()
+                    if (lockoutSeconds > 0L) {
+                        Toast.makeText(
+                            context,
+                            context.getLockoutMessage(lockoutSeconds),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        showInvalidOldPasswordError = true
+                    }
                     patternState = ""
                 }
             }
