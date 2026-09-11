@@ -24,6 +24,8 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 13 | [Send the log off the phone](#13-send-the-log-off-the-phone) | Medium | Not started |
 | 14 | [Lock remotely by message](#14-lock-remotely-by-message) | Medium | Not started |
 | 15 | [Spoken warning or alarm](#15-spoken-warning-or-alarm) | Small | Not started |
+| 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Not started |
+| 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Not started |
 
 ## Against someone holding the unlocked phone
 
@@ -192,6 +194,46 @@ A Quick Settings tile that re-locks every app at once, for handing the phone to 
 
 - **Builds on:** `AppLockManager.clearAllUnlockStates`.
 - **Check first:** the tile's label and icon show outside the PIN and have to follow the disguise.
+
+## Following trusted Wi-Fi
+
+Two phone settings that could switch with the trusted networks from
+[AUTOMATION.md](AUTOMATION.md#built-in-trusted-wi-fi): relaxed on a trusted network, strict
+everywhere else. Both share this design:
+
+- **Own switches, shared networks.** Each setting gets its own switch and uses the same trusted
+  network list, so neither requires letting locked apps open on trusted Wi-Fi.
+  `TrustedNetworkMonitor` only runs while "Open locked apps on trusted Wi-Fi" is on today, so it
+  would have to run while any of the three is on.
+- **Fail closed, although Android stores the value.** Trust lives in memory, but these settings are
+  saved by Android and outlive the app. Write the strict value whenever the app starts, whenever
+  trust drops and when the switch is turned off, and the relaxed value only while trust holds.
+  `TrustedNetworkMonitor.updateState` acts only on a change and trust starts out false, so the write
+  at start has to be added.
+- **No timer.** Writes follow the trust changes the app already tracks. If Android misses the phone
+  leaving a network, the screen-on check drops trust, so a wrong value lasts only a moment after
+  the screen turns on.
+
+### 16. Screen timeout by network
+
+A longer screen timeout on a trusted network and a shorter one everywhere else, which shrinks the
+time a snatched phone stays unlocked away from home. Both durations are settings.
+
+- **Builds on:** `Settings.System.SCREEN_OFF_TIMEOUT`. It needs "Modify system settings", granted
+  from a switch in the phone's Settings.
+- **Check first:** a timeout changed by hand is overwritten at the next trust change.
+
+### 17. Lock-screen notification content by network
+
+Show notification content on the lock screen on a trusted network and hide it everywhere else.
+Unlike item 7, this covers the lock screen only, for every app.
+
+- **Builds on:** the secure setting `lock_screen_allow_private_notifications` (1 shows content, 0
+  hides it). It needs `WRITE_SECURE_SETTINGS`, which only ADB or Shizuku can grant:
+  `adb shell pm grant dev.pranav.applock android.permission.WRITE_SECURE_SETTINGS`, or through
+  Shizuku, which the app already uses. The grant survives app updates but not an uninstall.
+- **Check first:** that Android accepts this write from an app targeting SDK 37. Without the
+  permission the switch should stay off.
 
 ## To check before new features
 
