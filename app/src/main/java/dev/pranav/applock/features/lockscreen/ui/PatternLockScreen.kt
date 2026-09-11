@@ -52,6 +52,7 @@ fun PatternLockScreen(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             var showError by remember { mutableStateOf(false) }
+            val lockoutSeconds = rememberLockoutSeconds()
 
             @Suppress("ASSIGNED_BUT_NOT_ACCESSED_WARNING")
             var errorShakeOffset by remember { mutableStateOf(0f) }
@@ -79,6 +80,11 @@ fun PatternLockScreen(
                 }
 
                 override fun onResult(result: List<Dot>) {
+                    // Nothing is checked during a wait, so a pattern drawn then is simply ignored.
+                    // Read the repository rather than lockoutSeconds: the pattern view may keep hold
+                    // of an older copy of this callback.
+                    if (appLockRepository.getLockoutRemainingMillis() > 0L) return
+
                     patternIds.value = result.map { it.id }
                     val patternString = result.joinToString("") { it.id.toString() }
 
@@ -119,10 +125,14 @@ fun PatternLockScreen(
                                 textAlign = TextAlign.Center
                             )
 
-                            if (showError) {
+                            if (lockoutSeconds > 0L || showError) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = stringResource(R.string.incorrect_pattern_try_again),
+                                    text = if (lockoutSeconds > 0L) {
+                                        lockoutMessage(lockoutSeconds)
+                                    } else {
+                                        stringResource(R.string.incorrect_pattern_try_again)
+                                    },
                                     color = MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.bodySmall,
                                     textAlign = TextAlign.Center
@@ -152,7 +162,7 @@ fun PatternLockScreen(
                         modifier = Modifier
                             .weight(1f)
                             .aspectRatio(1f)
-                            .graphicsLayer(translationX = shakeAnimation),
+                            .graphicsLayer(translationX = shakeAnimation, alpha = if (lockoutSeconds > 0L) 0.38f else 1f),
                         dimension = 3,
                         sensitivity = 50f,
                         dotsColor = MaterialTheme.colorScheme.primary,
@@ -191,10 +201,14 @@ fun PatternLockScreen(
                             textAlign = TextAlign.Center
                         )
 
-                        if (showError) {
+                        if (lockoutSeconds > 0L || showError) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = stringResource(R.string.incorrect_pattern_try_again),
+                                text = if (lockoutSeconds > 0L) {
+                                    lockoutMessage(lockoutSeconds)
+                                } else {
+                                    stringResource(R.string.incorrect_pattern_try_again)
+                                },
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.labelLarge,
                                 textAlign = TextAlign.Center
@@ -228,7 +242,7 @@ fun PatternLockScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
-                                .graphicsLayer(translationX = shakeAnimation),
+                                .graphicsLayer(translationX = shakeAnimation, alpha = if (lockoutSeconds > 0L) 0.38f else 1f),
                             dimension = 3,
                             sensitivity = 50f,
                             dotsColor = MaterialTheme.colorScheme.primary,
