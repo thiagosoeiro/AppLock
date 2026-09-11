@@ -19,11 +19,11 @@ class PreferencesRepository(context: Context) {
 
     private val attemptLimiter = UnlockAttemptLimiter(context)
 
+    private val credentialHasher = CredentialHasher(context)
+
     fun setPassword(password: String) {
-        val salt = SecurityUtils.generateSalt()
-        val saltedHash = SecurityUtils.hashPassword(password, salt)
         appLockPrefs.edit(commit = true) {
-            putString(KEY_PASSWORD, saltedHash)
+            putString(KEY_PASSWORD, credentialHasher.hash(password))
             putInt(KEY_PIN_LENGTH, SecurityUtils.sanitizePassword(password).length)
         }
     }
@@ -39,22 +39,16 @@ class PreferencesRepository(context: Context) {
         if (stored.isNullOrBlank()) return false
 
         val sanitizedInput = SecurityUtils.sanitizePassword(input)
+        if (!credentialHasher.verify(sanitizedInput, stored)) return false
 
-        if (SecurityUtils.isSaltedHash(stored)) {
-            val isValid = SecurityUtils.verifyPassword(sanitizedInput, stored)
-            // A PIN set before its length was stored gets the length recorded on its next unlock.
-            if (isValid && getPinLength() != sanitizedInput.length) {
-                appLockPrefs.edit(commit = true) { putInt(KEY_PIN_LENGTH, sanitizedInput.length) }
-            }
-            return isValid
-        }
-
-        if (stored == input || stored == sanitizedInput) {
+        if (!credentialHasher.isCurrent(stored)) {
+            // Still in an older format the startup upgrade couldn't finish; re-store it.
             setPassword(sanitizedInput)
-            return true
+        } else if (getPinLength() != sanitizedInput.length) {
+            // A PIN set before its length was stored gets the length recorded on its next unlock.
+            appLockPrefs.edit(commit = true) { putInt(KEY_PIN_LENGTH, sanitizedInput.length) }
         }
-
-        return false
+        return true
     }
 
     /**
@@ -67,7 +61,7 @@ class PreferencesRepository(context: Context) {
     }
 
     fun setPattern(pattern: String) {
-        appLockPrefs.edit(commit = true) { putString(KEY_PATTERN, SecurityUtils.hashPassword(pattern)) }
+        appLockPrefs.edit(commit = true) { putString(KEY_PATTERN, credentialHasher.hash(pattern)) }
     }
 
     fun getPattern(): String? {
@@ -78,30 +72,48 @@ class PreferencesRepository(context: Context) {
         limitAttempts(inputPattern) { checkPattern(it) }
 
     private fun checkPattern(inputPattern: String): Boolean {
-        val storedPattern = getPattern() ?: return false
+        val storedPattern = getPattern()
+        if (storedPattern.isNullOrBlank()) return false
+        if (!credentialHasher.verify(inputPattern, storedPattern)) return false
 
-        if (SecurityUtils.isSaltedHash(storedPattern)) {
-            return SecurityUtils.verifyPassword(inputPattern, storedPattern)
-        }
-
-        // A pattern set before patterns were hashed, if the upgrade at startup didn't get to it.
-        if (SecurityUtils.constantTimeEquals(storedPattern, inputPattern)) {
-            setPattern(inputPattern)
-            return true
-        }
-
-        return false
+        // Still in an older format the startup upgrade couldn't finish; re-store it.
+        if (!credentialHasher.isCurrent(storedPattern)) setPattern(inputPattern)
+        return true
     }
 
     /**
-     * Brings stored credentials up to the current format when the app starts, before any lock
-     * screen checks them. A pattern stored as plain text is hashed; patterns are digits only, so
-     * one can never be mistaken for a salted hash.
+     * Brings the stored PIN, password and pattern up to the current format when the app starts,
+     * before any lock screen checks them and without waiting for an unlock. Patterns are digits
+     * only, so a plain-text one can never be mistaken for a hash.
+     *
+     * Ones restored from a backup, or copied over by a phone-transfer app, arrive without the key
+     * that checks them and could never match again. They're erased instead, so the app asks for a
+     * new PIN; locked apps and settings stay.
      */
     fun upgradeStoredCredentials() {
-        val storedPattern = getPattern()
-        if (!storedPattern.isNullOrBlank() && !SecurityUtils.isSaltedHash(storedPattern)) {
-            setPattern(storedPattern)
+        val password = getPassword()?.takeIf { it.isNotBlank() }
+        val pattern = getPattern()?.takeIf { it.isNotBlank() }
+
+        if (listOfNotNull(password, pattern).any(credentialHasher::isCurrent) &&
+            credentialHasher.isRestoredWithoutKey()
+        ) {
+            appLockPrefs.edit(commit = true) {
+                remove(KEY_PASSWORD)
+                remove(KEY_PATTERN)
+                remove(KEY_PIN_LENGTH)
+            }
+            return
+        }
+
+        val upgradedPassword =
+            password?.takeUnless(credentialHasher::isCurrent)?.let(credentialHasher::upgrade)
+        val upgradedPattern =
+            pattern?.takeUnless(credentialHasher::isCurrent)?.let(credentialHasher::upgrade)
+        if (upgradedPassword == null && upgradedPattern == null) return
+
+        appLockPrefs.edit(commit = true) {
+            upgradedPassword?.let { putString(KEY_PASSWORD, it) }
+            upgradedPattern?.let { putString(KEY_PATTERN, it) }
         }
     }
 
