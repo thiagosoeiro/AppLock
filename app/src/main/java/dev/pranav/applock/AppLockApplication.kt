@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import dev.pranav.applock.core.broadcast.AutomationReceiver
+import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.data.repository.AppLockRepository
 import org.lsposed.hiddenapibypass.HiddenApiBypass
@@ -38,6 +39,15 @@ class AppLockApplication : Application() {
         // Keep the exported receiver's component state in step with the preference, in case the
         // two drifted apart across a restore or an update.
         AutomationReceiver.setComponentEnabled(this, appLockRepository.isAutomationEnabled())
+
+        // Trust in a Wi-Fi network is never stored, so every start is protected until Android
+        // reports the network the phone is on. A failure here must not crash the app on every start,
+        // which would stop locking altogether.
+        try {
+            TrustedNetworkMonitor.refresh(this)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start trusted Wi-Fi monitoring", e)
+        }
 
         // Purge logs older than 3 days on every app start (run in background to avoid ANR)
         thread(start = true, name = "LogPurge") {

@@ -131,7 +131,7 @@ class UsageLockService: Service() {
 
     private fun safeMonitorForegroundApp() {
         try {
-            if (!appLockRepository.isProtectEnabled() || applicationContext.isDeviceLocked()) {
+            if (!appLockRepository.isProtectionActive() || applicationContext.isDeviceLocked()) {
                 if (applicationContext.isDeviceLocked()) {
                     AppLockManager.clearAllUnlockStates()
                     previousForegroundPackage = ""

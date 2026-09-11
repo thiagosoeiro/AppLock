@@ -1,6 +1,7 @@
 package dev.pranav.applock.data.repository
 
 import android.content.Context
+import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.data.manager.BackendServiceManager
 import dev.pranav.applock.services.AppLockManager
 
@@ -85,12 +86,27 @@ class AppLockRepository(private val context: Context) {
     fun setProtectEnabled(enabled: Boolean) = preferencesRepository.setProtectEnabled(enabled)
     fun isProtectEnabled(): Boolean = preferencesRepository.isProtectEnabled()
 
+    /**
+     * Whether locked apps should be locked right now: the shield is on, and no trusted Wi-Fi network
+     * is relaxing it. The lock backends check this; the shield and automation read [isProtectEnabled].
+     */
+    fun isProtectionActive(): Boolean =
+        isProtectEnabled() && !(isTrustedWifiEnabled() && TrustedNetworkMonitor.isOnTrustedNetwork())
+
     fun setAutomationEnabled(enabled: Boolean) =
         preferencesRepository.setAutomationEnabled(enabled)
 
     fun isAutomationEnabled(): Boolean = preferencesRepository.isAutomationEnabled()
     fun getAutomationToken(): String? = preferencesRepository.getAutomationToken()
     fun regenerateAutomationToken(): String = preferencesRepository.regenerateAutomationToken()
+
+    fun setTrustedWifiEnabled(enabled: Boolean) =
+        preferencesRepository.setTrustedWifiEnabled(enabled)
+
+    fun isTrustedWifiEnabled(): Boolean = preferencesRepository.isTrustedWifiEnabled()
+    fun getTrustedWifiSsids(): Set<String> = preferencesRepository.getTrustedWifiSsids()
+    fun addTrustedWifiSsid(ssid: String) = preferencesRepository.addTrustedWifiSsid(ssid)
+    fun removeTrustedWifiSsid(ssid: String) = preferencesRepository.removeTrustedWifiSsid(ssid)
 
     fun setUnlockTimeDuration(minutes: Int) = preferencesRepository.setUnlockTimeDuration(minutes)
     fun getUnlockTimeDuration(): Int = preferencesRepository.getUnlockTimeDuration()

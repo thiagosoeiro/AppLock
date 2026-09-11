@@ -118,7 +118,7 @@ class ShizukuActivityManager(
     }
 
     private fun checkForegroundApp() {
-        if (!appLockRepository.isProtectEnabled()) return
+        if (!appLockRepository.isProtectionActive()) return
         if (appLockRepository.getBackendImplementation() != BackendImplementation.SHIZUKU) {
             handler.removeCallbacks(checkForegroundRunnable)
             return

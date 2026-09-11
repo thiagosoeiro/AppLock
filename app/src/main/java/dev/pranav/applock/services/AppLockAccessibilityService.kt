@@ -141,7 +141,7 @@ class AppLockAccessibilityService : AccessibilityService() {
             checkForDeviceAdminDeactivation(event)
         }
 
-        if (!appLockRepository.isProtectEnabled()) {
+        if (!appLockRepository.isProtectionActive()) {
             return
         }
 
