@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.SecurityUtils
 import dev.pranav.applock.core.utils.appLockRepository
-import dev.pranav.applock.services.AppLockManager
 
 /**
  * Lets automation apps (MacroDroid, Tasker, adb) set the global protection flag - the same flag
@@ -101,14 +100,7 @@ class AutomationReceiver : BroadcastReceiver() {
             repository.setProtectEnabled(enabled)
 
             if (enabled) {
-                // Fail closed: an app unlocked while protection was off must not stay unlocked once
-                // protection comes back, and the backend service may have been stopped meanwhile.
-                AppLockManager.clearAllUnlockStates()
-                try {
-                    AppLockServiceStarter.startAppropriateServices(context, repository)
-                } catch (e: Exception) {
-                    LogUtils.e(TAG, "Failed to start services after enabling protection", e)
-                }
+                AppLockServiceStarter.relockAll(context, repository)
             }
 
             LogUtils.d(TAG, "Protection set to $enabled")

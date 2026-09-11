@@ -220,6 +220,29 @@ class PreferencesRepository(context: Context) {
         return token
     }
 
+    fun setTrustedWifiEnabled(enabled: Boolean) {
+        settingsPrefs.edit(commit = true) { putBoolean(KEY_TRUSTED_WIFI_ENABLED, enabled) }
+    }
+
+    fun isTrustedWifiEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_TRUSTED_WIFI_ENABLED, DEFAULT_TRUSTED_WIFI_ENABLED)
+    }
+
+    /** Trusted Wi-Fi names, each exactly as Android reports it: quoted when valid UTF-8. */
+    fun getTrustedWifiSsids(): Set<String> {
+        return settingsPrefs.getStringSet(KEY_TRUSTED_WIFI_SSIDS, emptySet())?.toSet() ?: emptySet()
+    }
+
+    fun addTrustedWifiSsid(ssid: String) {
+        val updated = getTrustedWifiSsids() + ssid
+        settingsPrefs.edit(commit = true) { putStringSet(KEY_TRUSTED_WIFI_SSIDS, updated) }
+    }
+
+    fun removeTrustedWifiSsid(ssid: String) {
+        val updated = getTrustedWifiSsids() - ssid
+        settingsPrefs.edit(commit = true) { putStringSet(KEY_TRUSTED_WIFI_SSIDS, updated) }
+    }
+
     fun setUnlockTimeDuration(minutes: Int) {
         settingsPrefs.edit { putInt(KEY_UNLOCK_TIME_DURATION, minutes) }
     }
@@ -299,9 +322,12 @@ class PreferencesRepository(context: Context) {
         private const val KEY_AUTOMATION_ENABLED = "automation_enabled"
         private const val KEY_AUTOMATION_TOKEN = "automation_token"
         private const val KEY_PIN_LENGTH = "pin_length"
+        private const val KEY_TRUSTED_WIFI_ENABLED = "trusted_wifi_enabled"
+        private const val KEY_TRUSTED_WIFI_SSIDS = "trusted_wifi_ssids"
 
         private const val DEFAULT_PROTECT_ENABLED = true
         private const val DEFAULT_AUTOMATION_ENABLED = false
+        private const val DEFAULT_TRUSTED_WIFI_ENABLED = false
         private const val DEFAULT_UNLOCK_DURATION = 0
 
         /** The shortest PIN, pattern or password the set screens accept. */

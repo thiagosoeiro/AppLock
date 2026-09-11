@@ -5,8 +5,10 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.data.repository.BackendImplementation
 import dev.pranav.applock.services.AppLockAccessibilityService
+import dev.pranav.applock.services.AppLockManager
 import dev.pranav.applock.services.ShizukuAppLockService
 import dev.pranav.applock.services.UsageLockService
 import dev.pranav.applock.services.isServiceRunning
@@ -34,6 +36,23 @@ object AppLockServiceStarter {
             BackendImplementation.USAGE_STATS -> {
                 startService(context, UsageLockService::class.java)
             }
+        }
+    }
+
+    /**
+     * Puts locking back in force after a stretch without it: the shield turned back on, or the
+     * phone leaving a trusted Wi-Fi network. Fails closed - an app unlocked meanwhile must not stay
+     * unlocked, and the backend service may have been stopped.
+     */
+    fun relockAll(
+        context: Context,
+        repository: dev.pranav.applock.data.repository.AppLockRepository
+    ) {
+        AppLockManager.clearAllUnlockStates()
+        try {
+            startAppropriateServices(context, repository)
+        } catch (e: Exception) {
+            LogUtils.e(TAG, "Failed to start services while re-locking", e)
         }
     }
 

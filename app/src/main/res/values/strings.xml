@@ -320,6 +320,36 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
         Thank you for believing in my work!
     </string>
 
+    <!-- Trusted Wi-Fi -->
+    <string name="settings_screen_trusted_wifi_title">Trusted Wi-Fi</string>
+    <string name="settings_screen_trusted_wifi_control_title">Open locked apps on trusted Wi-Fi</string>
+    <string name="settings_screen_trusted_wifi_desc_off">Skip authentication while connected to a Wi-Fi network you trust. Apps stay locked everywhere else.</string>
+    <string name="settings_screen_trusted_wifi_desc_needs_permission">Needs location set to \"Allow all the time\". Until then, apps stay locked.</string>
+    <string name="settings_screen_trusted_wifi_desc_location_off">Location is off, so no network can be recognised and apps stay locked</string>
+    <string name="settings_screen_trusted_wifi_desc_no_networks">No trusted networks yet</string>
+    <string name="settings_screen_trusted_wifi_desc_trusted">On a trusted network: locked apps open without authentication</string>
+    <string name="settings_screen_trusted_wifi_desc_not_trusted">Not on a trusted network: apps stay locked</string>
+    <string name="settings_screen_trusted_wifi_location_denied">Trusted Wi-Fi needs precise location to read the network name</string>
+    <string name="settings_screen_trusted_wifi_background_denied">To use trusted Wi-Fi, set location for this app to \"Allow all the time\" in Android settings</string>
+    <string name="settings_screen_trusted_wifi_background_dialog_title">Allow location all the time</string>
+    <string name="settings_screen_trusted_wifi_background_dialog_text">Android only shares the name of the connected Wi-Fi network with apps that have location access, and only in the background with \"Allow all the time\". Choose it on the next screen.\n\nOnly the network name is read, never your position. Without this access, apps stay locked everywhere.</string>
+    <string name="settings_screen_trusted_wifi_background_dialog_confirm">Continue</string>
+    <string name="settings_screen_trusted_networks_title">Trusted networks</string>
+    <string name="settings_screen_trusted_networks_desc_disabled">Turn on trusted Wi-Fi to add networks</string>
+    <plurals name="settings_screen_trusted_networks_count">
+        <item quantity="one">%d network</item>
+        <item quantity="other">%d networks</item>
+    </plurals>
+    <string name="settings_screen_trusted_networks_dialog_title">Trusted networks</string>
+    <string name="settings_screen_trusted_networks_dialog_intro">Locked apps open without authentication while connected to one of these. Networks are matched by name, so a hotspot given the same name would count too.</string>
+    <string name="settings_screen_trusted_networks_dialog_empty">No trusted networks yet.</string>
+    <string name="settings_screen_trusted_networks_dialog_not_connected">Connect to the Wi-Fi network you want to trust, then add it here.</string>
+    <string name="settings_screen_trusted_networks_dialog_location_off">Turn on Location so the network name can be read.</string>
+    <string name="settings_screen_trusted_networks_add">Add %1$s</string>
+    <string name="settings_screen_trusted_networks_remove_cd">Remove %1$s</string>
+    <string name="settings_screen_trusted_networks_turn_on_location">Turn on Location</string>
+    <string name="settings_screen_trusted_networks_close">Done</string>
+
     <!-- Automation -->
     <string name="settings_screen_automation_title">Automation</string>
     <string name="settings_screen_automation_control_title">Allow automation apps</string>
