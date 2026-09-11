@@ -1,5 +1,6 @@
 package dev.pranav.applock.features.settings.ui
 
+import android.Manifest
 import android.app.admin.DevicePolicyManager
 import android.content.ClipData
 import android.content.ClipDescription
@@ -9,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PersistableBundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,11 +44,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavController
 import dev.pranav.applock.R
 import dev.pranav.applock.core.broadcast.AutomationReceiver
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.navigation.Screen
+import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.canAuthenticateBiometrics
 import dev.pranav.applock.core.utils.hasUsagePermission
@@ -102,6 +108,18 @@ fun SettingsScreen(
     var automationEnabled by remember { mutableStateOf(appLockRepository.isAutomationEnabled()) }
     var automationToken by remember { mutableStateOf(appLockRepository.getAutomationToken()) }
     var showAutomationDialog by remember { mutableStateOf(false) }
+    var trustedWifiEnabled by remember { mutableStateOf(appLockRepository.isTrustedWifiEnabled()) }
+    var trustedWifiSsids by remember { mutableStateOf(appLockRepository.getTrustedWifiSsids()) }
+    var showTrustedNetworksDialog by remember { mutableStateOf(false) }
+    var showBackgroundLocationDialog by remember { mutableStateOf(false) }
+    val trustedNetworkState by TrustedNetworkMonitor.state.collectAsState()
+    var hasLocationAccess by remember {
+        mutableStateOf(
+            TrustedNetworkMonitor.hasLocationPermission(context) &&
+                    TrustedNetworkMonitor.hasBackgroundLocationPermission(context)
+        )
+    }
+    var locationEnabled by remember { mutableStateOf(TrustedNetworkMonitor.isLocationEnabled(context)) }
 
     var showPermissionDialog by remember { mutableStateOf(false) }
     var showDeviceAdminDialog by remember { mutableStateOf(false) }
@@ -120,6 +138,66 @@ fun SettingsScreen(
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    // Location access and the Location switch change in Android's settings, away from this screen.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasLocationAccess = TrustedNetworkMonitor.hasLocationPermission(context) &&
+                        TrustedNetworkMonitor.hasBackgroundLocationPermission(context)
+                locationEnabled = TrustedNetworkMonitor.isLocationEnabled(context)
+                if (trustedWifiEnabled) TrustedNetworkMonitor.refresh(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun enableTrustedWifi() {
+        appLockRepository.setTrustedWifiEnabled(true)
+        trustedWifiEnabled = true
+        hasLocationAccess = true
+        TrustedNetworkMonitor.refresh(context)
+        if (trustedWifiSsids.isEmpty()) showTrustedNetworksDialog = true
+    }
+
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            enableTrustedWifi()
+        } else {
+            Toast.makeText(
+                context,
+                context.getString(R.string.settings_screen_trusted_wifi_background_denied),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        when {
+            !TrustedNetworkMonitor.hasLocationPermission(context) -> {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.settings_screen_trusted_wifi_location_denied),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+            TrustedNetworkMonitor.hasBackgroundLocationPermission(context) -> enableTrustedWifi()
+
+            // From Android 11, "Allow all the time" is only offered on its own settings page.
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                showBackgroundLocationDialog = true
+            }
+
+            else -> backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
     }
 
     if (showDialog) {
@@ -183,6 +261,52 @@ fun SettingsScreen(
                 ).show()
             },
             onDismiss = { showAutomationDialog = false }
+        )
+    }
+
+    if (showBackgroundLocationDialog) {
+        AlertDialog(
+            onDismissRequest = { showBackgroundLocationDialog = false },
+            title = { Text(stringResource(R.string.settings_screen_trusted_wifi_background_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_screen_trusted_wifi_background_dialog_text)) },
+            confirmButton = {
+                FilledTonalButton(
+                    onClick = {
+                        showBackgroundLocationDialog = false
+                        backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    }
+                ) {
+                    Text(stringResource(R.string.settings_screen_trusted_wifi_background_dialog_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBackgroundLocationDialog = false }) {
+                    Text(stringResource(R.string.cancel_button))
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showTrustedNetworksDialog) {
+        TrustedNetworksDialog(
+            trustedSsids = trustedWifiSsids,
+            currentSsid = trustedNetworkState.currentSsid,
+            locationEnabled = locationEnabled,
+            onAdd = { ssid ->
+                appLockRepository.addTrustedWifiSsid(ssid)
+                trustedWifiSsids = appLockRepository.getTrustedWifiSsids()
+                TrustedNetworkMonitor.refresh(context)
+            },
+            onRemove = { ssid ->
+                appLockRepository.removeTrustedWifiSsid(ssid)
+                trustedWifiSsids = appLockRepository.getTrustedWifiSsids()
+                TrustedNetworkMonitor.refresh(context)
+            },
+            onOpenLocationSettings = {
+                context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            },
+            onDismiss = { showTrustedNetworksDialog = false }
         )
     }
 
@@ -403,6 +527,86 @@ fun SettingsScreen(
                                     context.startActivity(
                                         Intent(context, AdminDisableActivity::class.java)
                                     )
+                                }
+                            }
+                        )
+                    )
+                )
+            }
+
+            item {
+                SectionTitle(text = stringResource(R.string.settings_screen_trusted_wifi_title))
+            }
+
+            item {
+                SettingsGroup(
+                    items = listOf(
+                        ToggleSettingItem(
+                            icon = Icons.Default.Wifi,
+                            title = stringResource(R.string.settings_screen_trusted_wifi_control_title),
+                            subtitle = stringResource(
+                                when {
+                                    !trustedWifiEnabled -> R.string.settings_screen_trusted_wifi_desc_off
+                                    !hasLocationAccess -> R.string.settings_screen_trusted_wifi_desc_needs_permission
+                                    !locationEnabled -> R.string.settings_screen_trusted_wifi_desc_location_off
+                                    trustedWifiSsids.isEmpty() -> R.string.settings_screen_trusted_wifi_desc_no_networks
+                                    trustedNetworkState.trusted -> R.string.settings_screen_trusted_wifi_desc_trusted
+                                    else -> R.string.settings_screen_trusted_wifi_desc_not_trusted
+                                }
+                            ),
+                            checked = trustedWifiEnabled,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                when {
+                                    !isChecked -> {
+                                        appLockRepository.setTrustedWifiEnabled(false)
+                                        trustedWifiEnabled = false
+                                        TrustedNetworkMonitor.refresh(context)
+                                    }
+
+                                    !TrustedNetworkMonitor.hasLocationPermission(context) -> {
+                                        locationPermissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                                Manifest.permission.ACCESS_COARSE_LOCATION
+                                            )
+                                        )
+                                    }
+
+                                    !TrustedNetworkMonitor.hasBackgroundLocationPermission(context) -> {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                            showBackgroundLocationDialog = true
+                                        } else {
+                                            backgroundLocationLauncher.launch(
+                                                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                                            )
+                                        }
+                                    }
+
+                                    else -> enableTrustedWifi()
+                                }
+                            }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Router,
+                            title = stringResource(R.string.settings_screen_trusted_networks_title),
+                            subtitle = if (trustedWifiEnabled)
+                                context.resources.getQuantityString(
+                                    R.plurals.settings_screen_trusted_networks_count,
+                                    trustedWifiSsids.size,
+                                    trustedWifiSsids.size
+                                )
+                            else
+                                stringResource(R.string.settings_screen_trusted_networks_desc_disabled),
+                            onClick = {
+                                if (!trustedWifiEnabled) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.settings_screen_trusted_networks_desc_disabled),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    showTrustedNetworksDialog = true
                                 }
                             }
                         )
@@ -1147,6 +1351,108 @@ fun AutomationTokenDialog(
                 TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.settings_screen_automation_close))
                 }
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+fun TrustedNetworksDialog(
+    trustedSsids: Set<String>,
+    currentSsid: String?,
+    locationEnabled: Boolean,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onOpenLocationSettings: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val addableSsid = currentSsid?.takeIf { it !in trustedSsids }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_screen_trusted_networks_dialog_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_screen_trusted_networks_dialog_intro),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                if (trustedSsids.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.settings_screen_trusted_networks_dialog_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                trustedSsids.sortedBy { TrustedNetworkMonitor.displayName(it).lowercase() }
+                    .forEach { ssid ->
+                        val name = TrustedNetworkMonitor.displayName(ssid)
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp)
+                            ) {
+                                Text(
+                                    text = name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { onRemove(ssid) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = stringResource(
+                                            R.string.settings_screen_trusted_networks_remove_cd,
+                                            name
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                val hint = when {
+                    !locationEnabled -> R.string.settings_screen_trusted_networks_dialog_location_off
+                    currentSsid == null -> R.string.settings_screen_trusted_networks_dialog_not_connected
+                    else -> null
+                }
+                if (hint != null) {
+                    Text(
+                        text = stringResource(hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (!locationEnabled) {
+                FilledTonalButton(onClick = onOpenLocationSettings) {
+                    Text(stringResource(R.string.settings_screen_trusted_networks_turn_on_location))
+                }
+            } else if (addableSsid != null) {
+                FilledTonalButton(onClick = { onAdd(addableSsid) }) {
+                    Text(
+                        stringResource(
+                            R.string.settings_screen_trusted_networks_add,
+                            TrustedNetworkMonitor.displayName(addableSsid)
+                        )
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_screen_trusted_networks_close))
             }
         },
         containerColor = MaterialTheme.colorScheme.surface
