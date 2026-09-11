@@ -109,6 +109,19 @@ fun SettingsScreen(
 
     val isBiometricAvailable = remember { context.canAuthenticateBiometrics() }
 
+    // Anti-uninstall also changes away from this screen - granting device admin turns it on, and
+    // AdminDisableActivity turns it off - so follow the stored flag rather than reading it once.
+    DisposableEffect(Unit) {
+        val prefs = context.getSharedPreferences("app_lock_settings", Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "anti_uninstall") {
+                antiUninstallEnabled = appLockRepository.isAntiUninstallEnabled()
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
