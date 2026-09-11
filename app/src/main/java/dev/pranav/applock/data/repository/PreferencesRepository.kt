@@ -17,24 +17,36 @@ class PreferencesRepository(context: Context) {
     private val settingsPrefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME_SETTINGS, Context.MODE_PRIVATE)
 
+    private val attemptLimiter = UnlockAttemptLimiter(context)
+
     fun setPassword(password: String) {
         val salt = SecurityUtils.generateSalt()
         val saltedHash = SecurityUtils.hashPassword(password, salt)
-        appLockPrefs.edit(commit = true) { putString(KEY_PASSWORD, saltedHash) }
+        appLockPrefs.edit(commit = true) {
+            putString(KEY_PASSWORD, saltedHash)
+            putInt(KEY_PIN_LENGTH, SecurityUtils.sanitizePassword(password).length)
+        }
     }
 
     fun getPassword(): String? {
         return appLockPrefs.getString(KEY_PASSWORD, null)
     }
 
-    fun validatePassword(input: String): Boolean {
+    fun validatePassword(input: String): Boolean = limitAttempts(input) { checkPassword(it) }
+
+    private fun checkPassword(input: String): Boolean {
         val stored = getPassword()
         if (stored.isNullOrBlank()) return false
 
         val sanitizedInput = SecurityUtils.sanitizePassword(input)
 
         if (SecurityUtils.isSaltedHash(stored)) {
-            return SecurityUtils.verifyPassword(sanitizedInput, stored)
+            val isValid = SecurityUtils.verifyPassword(sanitizedInput, stored)
+            // A PIN set before its length was stored gets the length recorded on its next unlock.
+            if (isValid && getPinLength() != sanitizedInput.length) {
+                appLockPrefs.edit(commit = true) { putInt(KEY_PIN_LENGTH, sanitizedInput.length) }
+            }
+            return isValid
         }
 
         if (stored == input || stored == sanitizedInput) {
@@ -45,6 +57,15 @@ class PreferencesRepository(context: Context) {
         return false
     }
 
+    /**
+     * How many characters the PIN or password has, so Auto Unlock can check a PIN only once that
+     * many digits are in. 0 while unknown: it is stored when the PIN is set, or on the next unlock
+     * for a PIN set before that.
+     */
+    fun getPinLength(): Int {
+        return appLockPrefs.getInt(KEY_PIN_LENGTH, 0)
+    }
+
     fun setPattern(pattern: String) {
         appLockPrefs.edit(commit = true) { putString(KEY_PATTERN, pattern) }
     }
@@ -53,9 +74,38 @@ class PreferencesRepository(context: Context) {
         return appLockPrefs.getString(KEY_PATTERN, null)
     }
 
-    fun validatePattern(inputPattern: String): Boolean {
+    fun validatePattern(inputPattern: String): Boolean =
+        limitAttempts(inputPattern) { checkPattern(it) }
+
+    private fun checkPattern(inputPattern: String): Boolean {
         val storedPattern = getPattern()
         return storedPattern != null && inputPattern == storedPattern
+    }
+
+    /** How long until another PIN, pattern or password may be tried, or 0 if one may be now. */
+    fun getLockoutRemainingMillis(): Long = attemptLimiter.remainingMillis()
+
+    /**
+     * Forgets wrong entries and ends any wait. Called after a strong biometric, which only the owner
+     * can pass, so a thief's wrong tries don't leave the owner one typo away from a long wait.
+     */
+    fun clearFailedAttempts() = attemptLimiter.recordSuccess()
+
+    /**
+     * Runs [check] under the attempt limit. During a wait nothing is checked, so even the right entry
+     * is refused. A miss shorter than any PIN, pattern or password that can be set isn't counted: it
+     * can never match, so it gives nothing away, and a stray tap on the pattern grid doesn't cost a try.
+     */
+    private fun limitAttempts(input: String, check: (String) -> Boolean): Boolean {
+        if (attemptLimiter.remainingMillis() > 0L) return false
+
+        val isValid = check(input)
+        if (isValid) {
+            attemptLimiter.recordSuccess()
+        } else if (input.length >= MIN_CREDENTIAL_LENGTH) {
+            attemptLimiter.recordFailure()
+        }
+        return isValid
     }
 
     fun setLockType(lockType: String) {
@@ -213,10 +263,14 @@ class PreferencesRepository(context: Context) {
         private const val KEY_LOCK_TYPE = "lock_type"
         private const val KEY_AUTOMATION_ENABLED = "automation_enabled"
         private const val KEY_AUTOMATION_TOKEN = "automation_token"
+        private const val KEY_PIN_LENGTH = "pin_length"
 
         private const val DEFAULT_PROTECT_ENABLED = true
         private const val DEFAULT_AUTOMATION_ENABLED = false
         private const val DEFAULT_UNLOCK_DURATION = 0
+
+        /** The shortest PIN, pattern or password the set screens accept. */
+        private const val MIN_CREDENTIAL_LENGTH = 4
 
         const val LOCK_TYPE_PIN = "pin"
         const val LOCK_TYPE_PATTERN = "pattern"

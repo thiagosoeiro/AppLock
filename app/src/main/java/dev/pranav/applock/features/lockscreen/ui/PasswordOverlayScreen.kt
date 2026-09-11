@@ -268,6 +268,7 @@ class PasswordOverlayActivity: FragmentActivity() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 super.onAuthenticationSucceeded(result)
                 isBiometricPromptShowingLocal = false
+                appLockRepository.clearFailedAttempts()
                 lockedPackageNameFromIntent?.let { pkgName ->
                     AppLockManager.temporarilyUnlockAppWithBiometrics(pkgName)
                     // Fix: Do NOT relaunch the app. Just finish the overlay to reveal the underlying activity.
@@ -393,6 +394,24 @@ fun PinPasswordOverlayScreen(
             var showError by remember { mutableStateOf(false) }
             val minLength = 4
 
+            // Auto Unlock checks the PIN only once it has as many digits as the real one: every
+            // wrong check counts towards the lockout, so checking each digit would count the user's
+            // own typing. Until the length is known, Auto Unlock waits for the proceed key.
+            val onPasswordChange: () -> Unit = {
+                showError = false
+
+                if (appLockRepository.isAutoUnlockEnabled() &&
+                    passwordState.value.length == appLockRepository.getPinLength()
+                ) {
+                    onPinAttempt?.let { attempt ->
+                        if (!attempt(passwordState.value)) {
+                            passwordState.value = ""
+                            showError = true
+                        }
+                    }
+                }
+            }
+
             if (isLandscape) {
                 Row(
                     modifier = Modifier
@@ -455,13 +474,7 @@ fun PinPasswordOverlayScreen(
                             onBiometricAuth = onBiometricAuth,
                             onAuthSuccess = onAuthSuccess,
                             onPinAttempt = onPinAttempt,
-                            onPasswordChange = {
-                                showError = false
-
-                                if (appLockRepository.isAutoUnlockEnabled()) {
-                                    onPinAttempt?.invoke(passwordState.value)
-                                }
-                            },
+                            onPasswordChange = onPasswordChange,
                             onPinIncorrect = { showError = true }
                         )
                     }
@@ -524,13 +537,7 @@ fun PinPasswordOverlayScreen(
                         onBiometricAuth = onBiometricAuth,
                         onAuthSuccess = onAuthSuccess,
                         onPinAttempt = onPinAttempt,
-                        onPasswordChange = {
-                            showError = false
-
-                            if (appLockRepository.isAutoUnlockEnabled()) {
-                                onPinAttempt?.invoke(passwordState.value)
-                            }
-                        },
+                        onPasswordChange = onPasswordChange,
                         onPinIncorrect = { showError = true }
                     )
                 }

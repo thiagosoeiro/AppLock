@@ -57,6 +57,10 @@ class AppLockRepository(private val context: Context) {
     fun validatePattern(inputPattern: String): Boolean =
         preferencesRepository.validatePattern(inputPattern)
 
+    fun getPinLength(): Int = preferencesRepository.getPinLength()
+    fun getLockoutRemainingMillis(): Long = preferencesRepository.getLockoutRemainingMillis()
+    fun clearFailedAttempts() = preferencesRepository.clearFailedAttempts()
+
     fun setLockType(lockType: String) = preferencesRepository.setLockType(lockType)
     fun getLockType(): String = preferencesRepository.getLockType()
 
