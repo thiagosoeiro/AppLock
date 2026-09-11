@@ -67,7 +67,7 @@ class PreferencesRepository(context: Context) {
     }
 
     fun setPattern(pattern: String) {
-        appLockPrefs.edit(commit = true) { putString(KEY_PATTERN, pattern) }
+        appLockPrefs.edit(commit = true) { putString(KEY_PATTERN, SecurityUtils.hashPassword(pattern)) }
     }
 
     fun getPattern(): String? {
@@ -78,8 +78,31 @@ class PreferencesRepository(context: Context) {
         limitAttempts(inputPattern) { checkPattern(it) }
 
     private fun checkPattern(inputPattern: String): Boolean {
+        val storedPattern = getPattern() ?: return false
+
+        if (SecurityUtils.isSaltedHash(storedPattern)) {
+            return SecurityUtils.verifyPassword(inputPattern, storedPattern)
+        }
+
+        // A pattern set before patterns were hashed, if the upgrade at startup didn't get to it.
+        if (SecurityUtils.constantTimeEquals(storedPattern, inputPattern)) {
+            setPattern(inputPattern)
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     * Brings stored credentials up to the current format when the app starts, before any lock
+     * screen checks them. A pattern stored as plain text is hashed; patterns are digits only, so
+     * one can never be mistaken for a salted hash.
+     */
+    fun upgradeStoredCredentials() {
         val storedPattern = getPattern()
-        return storedPattern != null && inputPattern == storedPattern
+        if (!storedPattern.isNullOrBlank() && !SecurityUtils.isSaltedHash(storedPattern)) {
+            setPattern(storedPattern)
+        }
     }
 
     /** How long until another PIN, pattern or password may be tried, or 0 if one may be now. */
