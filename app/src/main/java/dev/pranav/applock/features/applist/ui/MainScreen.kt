@@ -48,6 +48,7 @@ import dev.pranav.applock.R
 import dev.pranav.applock.core.broadcast.AutomationReceiver
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.navigation.Screen
+import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.core.utils.hasUsagePermission
 import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
@@ -86,6 +87,10 @@ fun MainScreen(
         val appLockRepository = context.appLockRepository()
         applockEnabled = appLockRepository.isProtectEnabled()
     }
+
+    // On a trusted Wi-Fi network the shield is still on, but locked apps open freely: say so.
+    val trustedNetworkState by TrustedNetworkMonitor.state.collectAsState()
+    val relaxedByTrustedWifi = applockEnabled && trustedNetworkState.trusted
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -170,9 +175,18 @@ fun MainScreen(
                             AutomationReceiver.notifyStateChanged(context, applockEnabled)
                         },
                         shape = RoundedCornerShape(16.dp),
-                        color = if (applockEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        color = when {
+                            relaxedByTrustedWifi -> MaterialTheme.colorScheme.tertiaryContainer
+                            applockEnabled -> MaterialTheme.colorScheme.primaryContainer
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        },
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
+                        val shieldContentColor = when {
+                            relaxedByTrustedWifi -> MaterialTheme.colorScheme.onTertiaryContainer
+                            applockEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -181,13 +195,17 @@ fun MainScreen(
                                 imageVector = if (applockEnabled) Icons.Default.Shield else Icons.Outlined.Shield,
                                 contentDescription = stringResource(R.string.main_screen_app_protection_cd),
                                 modifier = Modifier.size(18.dp),
-                                tint = if (applockEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = shieldContentColor
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (applockEnabled) "ON" else "OFF",
+                                text = when {
+                                    relaxedByTrustedWifi -> "HOME"
+                                    applockEnabled -> "ON"
+                                    else -> "OFF"
+                                },
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (applockEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = shieldContentColor
                             )
                         }
                     }
