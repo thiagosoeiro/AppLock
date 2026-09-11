@@ -33,7 +33,11 @@ class AppLockAccessibilityService : AccessibilityService() {
     private val keyboardPackages: List<String> by lazy { getKeyboardPackageNames() }
 
     // Our label as Settings displays it; the anti-uninstall checks match on it, so they follow any rename.
-    private val ownLabel: String by lazy { applicationInfo.loadLabel(packageManager).toString() }
+    // Looked up on every check rather than cached: the label is translated, and a cached copy keeps
+    // the old language's name after the phone's language changes, so every check would miss.
+    // PackageManager caches the string itself and drops that cache on a configuration change.
+    private val ownLabel: String
+        get() = applicationInfo.loadLabel(packageManager).toString()
 
     // Our version as Settings prints it on the App info page. Lists of apps never show a version,
     // which is what separates that page from a list our name merely appears in.
@@ -449,13 +453,14 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     private fun isDeactivationAttempt(event: AccessibilityEvent): Boolean {
+        val label = ownLabel
         val isAccessibilitySettings = event.className in ACCESSIBILITY_SETTINGS_CLASSES &&
-                event.text.any { it.contains(ownLabel) }
+                event.text.any { it.contains(label) }
         val isSubSettings = event.className == "com.android.settings.SubSettings" &&
-                event.text.any { it.contains(ownLabel) }
+                event.text.any { it.contains(label) }
         val isAlertDialog =
             event.packageName == "com.google.android.packageinstaller" && event.className == "android.app.AlertDialog" && event.text.toString()
-                .contains(ownLabel)
+                .contains(label)
 
         return isAccessibilitySettings || isSubSettings || isAlertDialog
     }

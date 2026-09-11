@@ -165,7 +165,7 @@ fun MainScreen(
                 actions = {
                     Surface(
                         onClick = {
-                            appLockRepository.setProtectEnabled(!applockEnabled)
+                            AutomationReceiver.setProtection(context, !applockEnabled)
                             applockEnabled = !applockEnabled
                             AutomationReceiver.notifyStateChanged(context, applockEnabled)
                         },

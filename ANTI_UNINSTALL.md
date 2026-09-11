@@ -48,8 +48,8 @@ With it **on**, these are what each Settings surface does:
 
 ### How each button is covered
 
-- **Uninstall** — blocked directly. Granting Device Admin calls `setUninstallBlocked`, which greys
-  the button out.
+- **Uninstall** — blocked by Android for as long as Device Admin is active: the app can't be removed
+  until its admin is turned off, and the page for turning it off bounces you (see the table above).
 - **Force stop** — greyed out by Android for any app with an active device admin. It briefly becomes
   tappable only while device admin is off (for example, right after an update, before the app
   re-arms).

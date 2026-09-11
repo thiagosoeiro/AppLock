@@ -118,11 +118,12 @@ fun Context.appLockRepository(): AppLockRepository =
     (applicationContext as AppLockApplication).appLockRepository
 
 /**
- * Whether the device can actually authenticate the user right now - biometric hardware is present,
- * available and something is enrolled.
+ * Whether the device can actually authenticate the user right now with a strong (Class 3)
+ * biometric - the hardware is present, available and something is enrolled. The prompts accept
+ * nothing weaker, since weak biometrics such as 2D face unlock can be fooled by a photo, so a device
+ * that only has weak ones counts as having none.
  */
 fun Context.canAuthenticateBiometrics(): Boolean =
     BiometricManager.from(this).canAuthenticate(
-        BiometricManager.Authenticators.BIOMETRIC_WEAK or
-                BiometricManager.Authenticators.BIOMETRIC_STRONG
+        BiometricManager.Authenticators.BIOMETRIC_STRONG
     ) == BiometricManager.BIOMETRIC_SUCCESS
