@@ -1,10 +1,8 @@
 package dev.pranav.applock.features.settings.ui
 
 import android.Manifest
-import android.app.admin.DevicePolicyManager
 import android.content.ClipData
 import android.content.ClipDescription
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -292,15 +290,7 @@ fun SettingsScreen(
             onDismiss = { showDeviceAdminDialog = false },
             onConfirm = {
                 showDeviceAdminDialog = false
-                val component = ComponentName(context, DeviceAdmin::class.java)
-                val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
-                    putExtra(
-                        DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                        context.getString(R.string.main_screen_device_admin_explanation)
-                    )
-                }
-                context.startActivity(intent)
+                DeviceAdmin.requestGrant(context)
             }
         )
     }
@@ -311,10 +301,7 @@ fun SettingsScreen(
             onConfirm = {
                 showAccessibilityDialog = false
                 openAccessibilitySettings(context)
-                val dpm =
-                    context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                val component = ComponentName(context, DeviceAdmin::class.java)
-                if (!dpm.isAdminActive(component)) {
+                if (!DeviceAdmin.hasForceLock(context)) {
                     showDeviceAdminDialog = true
                 }
             }
@@ -465,10 +452,8 @@ fun SettingsScreen(
                             enabled = true,
                             onCheckedChange = { isChecked ->
                                 if (isChecked) {
-                                    val dpm =
-                                        context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                                    val component = ComponentName(context, DeviceAdmin::class.java)
-                                    val hasDeviceAdmin = dpm.isAdminActive(component)
+                                    // An admin granted before force-lock was added needs granting again.
+                                    val hasDeviceAdmin = DeviceAdmin.hasForceLock(context)
                                     val hasAccessibility = context.isAccessibilityServiceEnabled()
 
                                     when {
