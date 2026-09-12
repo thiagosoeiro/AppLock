@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.core.content.getSystemService
+import dev.pranav.applock.R
+import dev.pranav.applock.core.utils.PhoneLocker
 
 class DeviceAdmin : DeviceAdminReceiver() {
     companion object {
@@ -42,12 +44,40 @@ class DeviceAdmin : DeviceAdminReceiver() {
         }
     }
 
+    /**
+     * Android calls this when someone taps Deactivate on our device admin page, before it removes
+     * anything. With anti-uninstall on, lock the phone on that tap and hand back a warning: Android
+     * then asks for OK in a second dialog, which is now behind the lock screen. The accessibility
+     * guard only sees the page once it is drawn and can lose to a fast tap; this runs on the tap.
+     *
+     * The warning is the disguised admin description, so it gives nothing away. App info's one-tap
+     * "Deactivate and uninstall" skips this call; [onDisabled] covers that route.
+     */
+    override fun onDisableRequested(context: Context, intent: android.content.Intent): CharSequence? {
+        if (!isAntiUninstallOn(context)) return super.onDisableRequested(context, intent)
+
+        PhoneLocker.lockPhone(context, "device admin deactivation requested")
+        return context.getString(R.string.device_admin_description)
+    }
+
+    /**
+     * Android calls this whenever our admin is removed, including App info's one-tap "Deactivate and
+     * uninstall", where it waits for this before force-stopping the app and opening the uninstall
+     * dialog. Turning anti-uninstall off with the PIN clears the flag first, so reaching this with
+     * the flag still on means someone got past the guards. Lock the phone, and leave the flag on:
+     * clearing it would switch off every other guard, and the main screen asks for the admin back.
+     */
     override fun onDisabled(context: Context, intent: android.content.Intent) {
         super.onDisabled(context, intent)
-        context.getSharedPreferences("app_lock_settings", Context.MODE_PRIVATE).edit {
-            putBoolean("anti_uninstall", false)
+        if (isAntiUninstallOn(context)) {
+            PhoneLocker.lockPhone(context, "device admin removed")
         }
     }
+
+    // The anti-uninstall flag, from the preferences onEnabled writes it to.
+    private fun isAntiUninstallOn(context: Context): Boolean =
+        context.getSharedPreferences("app_lock_settings", Context.MODE_PRIVATE)
+            .getBoolean("anti_uninstall", false)
 
     fun setPasswordVerified(context: Context, verified: Boolean) {
         getSharedPreferences(context).edit { putBoolean(KEY_PASSWORD_VERIFIED, verified) }
