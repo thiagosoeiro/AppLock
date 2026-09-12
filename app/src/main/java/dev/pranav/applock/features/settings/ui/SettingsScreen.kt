@@ -29,7 +29,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -63,7 +62,6 @@ import dev.pranav.applock.data.repository.BackendImplementation
 import dev.pranav.applock.features.admin.AdminDisableActivity
 import dev.pranav.applock.services.ShizukuAppLockService
 import dev.pranav.applock.services.UsageLockService
-import dev.pranav.applock.ui.components.DonateButton
 import dev.pranav.applock.ui.icons.*
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
@@ -408,10 +406,6 @@ fun SettingsScreen(
             }
 
             item {
-                DonateButton()
-            }
-
-            item {
                 SectionTitle(text = stringResource(R.string.settings_screen_lock_screen_customization_title))
             }
 
@@ -740,10 +734,6 @@ fun SettingsScreen(
                     context = context,
                     shizukuPermissionLauncher = shizukuPermissionLauncher
                 )
-            }
-
-            item {
-                LinksSection()
             }
         }
     }

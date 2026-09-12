@@ -54,7 +54,6 @@ import dev.pranav.applock.core.utils.hasUsagePermission
 import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
 import dev.pranav.applock.core.utils.openAccessibilitySettings
 import dev.pranav.applock.data.repository.BackendImplementation
-import dev.pranav.applock.ui.components.DonateModalBottomSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -123,34 +122,6 @@ fun MainScreen(
     }
 
     val appLockRepository = context.appLockRepository()
-
-    var showCommunityLink by remember { mutableStateOf(appLockRepository.isShowCommunityLink()) }
-
-    if (showCommunityLink) {
-        CommunityDialog(
-            onDismiss = {
-                appLockRepository.setCommunityLinkShown(true)
-                showCommunityLink = false
-            },
-            onJoin = {
-                appLockRepository.setCommunityLinkShown(true)
-                showCommunityLink = false
-                context.startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        "https://discord.gg/46wCMRVAre".toUri()
-                    )
-                )
-            }
-        )
-    }
-
-    var showDonateDialog by remember { mutableStateOf(appLockRepository.isShowDonateLink()) }
-    if (showDonateDialog && !showCommunityLink) {
-        DonateModalBottomSheet {
-            appLockRepository.setShowDonateLink(false); showDonateDialog = false
-        }
-    }
 
     Scaffold(
         modifier = Modifier
