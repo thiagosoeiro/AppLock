@@ -637,6 +637,13 @@ class AppLockAccessibilityService : AccessibilityService() {
             isServiceRunning = false
             connected = null
 
+            // Turning anti-uninstall off with the PIN clears the flag first, so the service going
+            // away with the flag still on means someone switched it off in Settings. Android has
+            // already dropped the connection, so this lock comes from device admin.
+            if (appLockRepository.isAntiUninstallEnabled()) {
+                PhoneLocker.lockPhone(this, "accessibility service turned off")
+            }
+
             if (Shizuku.pingBinder() && appLockRepository.isAntiUninstallEnabled()) {
                 enableAccessibilityServiceWithShizuku(ComponentName(packageName, javaClass.name))
             }
