@@ -20,8 +20,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.rounded.Forum
-import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,7 +35,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -54,7 +51,6 @@ import dev.pranav.applock.core.utils.hasUsagePermission
 import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
 import dev.pranav.applock.core.utils.openAccessibilitySettings
 import dev.pranav.applock.data.repository.BackendImplementation
-import dev.pranav.applock.ui.components.DonateModalBottomSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -119,36 +115,6 @@ fun MainScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    val appLockRepository = context.appLockRepository()
-
-    var showCommunityLink by remember { mutableStateOf(appLockRepository.isShowCommunityLink()) }
-
-    if (showCommunityLink) {
-        CommunityDialog(
-            onDismiss = {
-                appLockRepository.setCommunityLinkShown(true)
-                showCommunityLink = false
-            },
-            onJoin = {
-                appLockRepository.setCommunityLinkShown(true)
-                showCommunityLink = false
-                context.startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        "https://discord.gg/46wCMRVAre".toUri()
-                    )
-                )
-            }
-        )
-    }
-
-    var showDonateDialog by remember { mutableStateOf(appLockRepository.isShowDonateLink()) }
-    if (showDonateDialog && !showCommunityLink) {
-        DonateModalBottomSheet {
-            appLockRepository.setShowDonateLink(false); showDonateDialog = false
         }
     }
 
@@ -734,55 +700,6 @@ private fun SelectableAppItem(
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-    )
-}
-
-@Composable
-private fun CommunityDialog(
-    onDismiss: () -> Unit,
-    onJoin: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-        icon = {
-            Icon(
-                Icons.Rounded.Groups,
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-        },
-        title = {
-            Text(
-                text = stringResource(R.string.join_community),
-                style = MaterialTheme.typography.headlineSmall
-            )
-        },
-        text = {
-            Column(Modifier.fillMaxWidth(0.7f)) {
-                Text(
-                    text = stringResource(R.string.join_community_desc),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = onJoin) {
-                Icon(
-                    Icons.Rounded.Forum,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.join_discord))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.maybe_later))
-            }
-        }
     )
 }
 
