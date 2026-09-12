@@ -1,11 +1,12 @@
 # Security fixes
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
-before merging. The audit's findings table records the status of every finding, including the ones
-left open.
+before merging, and a fourth after anti-uninstall was beaten on the phone. The audit's findings
+table records the status of every finding, including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
-dropped as too complex.
+dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
+closing it.
 
 ## Status
 
@@ -14,6 +15,7 @@ dropped as too complex.
 | 1 — Quick fixes | F5, F8, F19, F20 | `fix/security-quick-fixes` | [#5](https://github.com/thiagosoeiro/AppLock/pull/5) | green (`8aff4bd`) | done | `1a77897` |
 | 2 — Rate limiting | F4 | `fix/security-rate-limiting` | [#6](https://github.com/thiagosoeiro/AppLock/pull/6) | green (`8f790a9`) | LGTM | `fa1e06b` |
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
+| 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | pending | pending | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -122,6 +124,39 @@ Merged in PR #7 after CI; signed off as LGTM. The same PR added this file and th
 - **Follow-ups noted, not done.** The main screen reads the protection state once, so the shield can
   still show ON after automation has turned protection off. And the log doesn't say whether a change
   came from the shield or from automation.
+
+## Chunk 4 — Anti-uninstall lock speed (in review)
+
+Not from the original scope. On 2026-09-12, with anti-uninstall on, device admin was deactivated and
+the app uninstalled on the phone, because the screen locked too late. PR #13, one commit per change.
+
+- **Why it lost.** Every lock came from the accessibility service reading a page once it was on
+  screen:
+  - events were held 100 ms, and could be dropped;
+  - a page not drawn yet was missed for good;
+  - the device admin block waited 100 ms, and did nothing once the admin was gone;
+  - `DeviceAdmin.onDisabled` cleared `anti_uninstall`, which switched every guard off.
+- **One way to lock** (`96468cf`). `PhoneLocker` tries the accessibility lock action, then
+  `DevicePolicyManager.lockNow()`, and logs which one locked and why.
+- **Admin callbacks** (`d631714`). `onDisableRequested` locks on the Deactivate tap and returns the
+  disguised admin description as a warning, so removal needs OK on a second prompt. `onDisabled`
+  locks, which for App info's one-tap "Deactivate and uninstall" happens before Android stops the
+  app, and leaves the flag on. Turning anti-uninstall off with the PIN clears the flag first.
+- **Force-lock** (`639afa7`). A new admin policy. Android keeps the policies granted at activation,
+  so the main screen and the Settings switch ask once for the admin again; for an active admin the
+  grant page only adds the policy. The guard leaves that page alone for a minute after the app opens
+  it, while the policy is still missing.
+- **Accessibility turned off** (`cf40ea4`). `onUnbind` locks through device admin, since Android has
+  already dropped the service's connection by then.
+- **Faster screen checks** (`462f341`).
+  - No event delay; this also reaches locked-app detection.
+  - Settings pages are checked as they open, at 150 and 400 ms and after content changes, for up to
+    a second, reading the window once per check.
+  - Blocks go Back, lock, Home, with no pause (part of F12).
+  - The uninstall-dialog check can run again (F9), but only within 3 s of the installer opening an
+    uninstall screen, so installing an update isn't blocked.
+- **Not checked on a phone yet.** The Android behaviour it relies on was read from AOSP, and One UI
+  may differ.
 
 ## Testing chunks 2 and 3
 

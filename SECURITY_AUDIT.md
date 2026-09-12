@@ -11,7 +11,7 @@ version catalog, the CI workflow, and every Kotlin and Java source file across `
 | Version | 2.5.1 (251) |
 | Reviewed | 2026-09-09 |
 | Follow-up | Anti-uninstall only, at `f5aa5a3` on `master`, 2026-09-10 |
-| Fix status | As of 2026-09-11, in the Status column below; details in `SECURITY_FIXES.md` |
+| Fix status | As of 2026-09-12, in the Status column below; details in `SECURITY_FIXES.md` |
 
 Findings are cited by file and line against that commit and will drift as the branch moves. F18–F23
 come from the follow-up and are cited against `f5aa5a3`. The findings are left as written at review
@@ -29,7 +29,7 @@ anti-uninstall protection deters a casual attempt but does not survive safe mode
 ADB.
 
 Twenty-three findings; six are worth acting on. Four of the six — F2, F3, F4 and F5 — have since
-been fixed, along with F8, F11, F19, F20 and F22; F1 and F18 remain open.
+been fixed, along with F8, F9, F11, F19, F20 and F22; F1 and F18 remain open.
 
 | Severity | Count |
 | --- | --- |
@@ -85,16 +85,16 @@ The privileged half of the manifest, and the one line that makes the rest defens
 | F6 | Low | Protection state is broadcast to every app on the device | Open |
 | F7 | Low | Rejection reasons leak configuration to unauthenticated callers | Open |
 | F8 | Low | The in-app shield toggle does not re-lock on enable | Fixed in #5 (`10d89dd`) |
-| F9 | Low | Anti-uninstall detection has two conditions that can never match | Partly: both casing bugs are gone (`907ddac`, `5d9935c`); the package-installer check is unchanged and was not re-verified |
+| F9 | Low | Anti-uninstall detection has two conditions that can never match | Fixed: both casing bugs are gone (`907ddac`, `5d9935c`), and #13 (`462f341`) lets package-installer events reach its check |
 | F10 | Low | Uninstall blocking targets the wrong user | Open |
 | F11 | Low | Non-null assertion on a nullable framework field | Fixed in `5d9935c` |
-| F12 | Low | Blocking sleeps on the main thread | Open |
+| F12 | Low | Blocking sleeps on the main thread | Partly, in #13 (`462f341`): the device admin block no longer sleeps; the lock overlay's close button still sleeps 200 ms |
 | F13 | Low | Log retention does not match its documentation | Open |
 | F14 | Hygiene | 110 MB of history from committed APKs | Open |
 | F15 | Hygiene | IDE state tracked against its own ignore rule | Open |
 | F16 | Hygiene | Empty ProGuard rules with minification enabled | Open |
 | F17 | Hygiene | CI actions pinned to tags, and every branch builds twice | Open |
-| F18 | High/medium | Anti-uninstall can be bypassed without the PIN | Open; a fix was considered and dropped as too complex |
+| F18 | High/medium | Anti-uninstall can be bypassed without the PIN | Open; a fix was considered and dropped as too complex. #13 narrows it: the phone locks as device admin or accessibility is removed, without reading the screen, but safe mode and ADB still get through |
 | F19 | Low | Granting device admin crashes the app | Fixed in #5 (`fcae9e7`) |
 | F20 | Low | Accessibility-settings detection only works in English | Fixed in `907ddac`; #5 closed the gap it left |
 | F21 | Low | Manually added packages show as protected but are never blocked | Open |
