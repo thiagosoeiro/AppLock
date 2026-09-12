@@ -5,7 +5,9 @@ import android.app.admin.DeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.os.SystemClock
 import androidx.core.content.edit
 import androidx.core.content.getSystemService
 import dev.pranav.applock.R
@@ -15,6 +17,12 @@ class DeviceAdmin : DeviceAdminReceiver() {
     companion object {
         private const val PREFS_NAME = "dev.pranav.applock.admin_prefs"
         private const val KEY_PASSWORD_VERIFIED = "password_verified"
+
+        // How long after the app opens the grant page itself the anti-uninstall guard leaves it be.
+        private const val OWN_GRANT_WINDOW_MS = 60_000L
+
+        @Volatile
+        private var ownGrantRequestedAt = 0L
 
         /**
          * True when our admin is active and holds the force-lock policy, so
@@ -30,6 +38,45 @@ class DeviceAdmin : DeviceAdminReceiver() {
                 // The admin was removed between the two calls.
                 false
             }
+        }
+
+        /**
+         * Opens Settings' page for granting our admin. Android keeps only the policies an admin was
+         * granted when it was activated, so an admin granted before force-lock was added lacks it;
+         * for an active admin the same request opens a page that adds the missing policy, with no
+         * need to deactivate first.
+         *
+         * While our admin is active, that page is the one the anti-uninstall guard bounces, so note
+         * that the app opened it itself; see [isOwnGrantPending].
+         */
+        fun requestGrant(context: Context) {
+            ownGrantRequestedAt = SystemClock.elapsedRealtime()
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(
+                    DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                    ComponentName(context, DeviceAdmin::class.java)
+                )
+                putExtra(
+                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                    context.getString(R.string.main_screen_device_admin_explanation)
+                )
+            }
+            context.startActivity(intent)
+        }
+
+        /**
+         * True for a minute after [requestGrant], and only while force-lock is still missing, so the
+         * guard is back as soon as the grant goes through. Only screens behind the PIN call
+         * [requestGrant]. The admin callbacks ignore this: Deactivate still locks the phone.
+         */
+        fun isOwnGrantPending(context: Context): Boolean {
+            val requestedAt = ownGrantRequestedAt
+            if (requestedAt == 0L ||
+                SystemClock.elapsedRealtime() - requestedAt > OWN_GRANT_WINDOW_MS
+            ) {
+                return false
+            }
+            return !hasForceLock(context)
         }
     }
 

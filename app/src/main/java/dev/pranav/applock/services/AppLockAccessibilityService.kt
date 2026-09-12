@@ -461,6 +461,12 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
 
+        // The app opens this same page itself to grant the admin or force-lock; let that through.
+        if (DeviceAdmin.isOwnGrantPending(this)) {
+            LogUtils.d(TAG, "Not blocking our device admin page: the app opened it to grant admin")
+            return
+        }
+
         blockDeviceAdminDeactivation()
     }
 
