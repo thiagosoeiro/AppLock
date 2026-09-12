@@ -29,7 +29,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,7 +42,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -63,7 +61,6 @@ import dev.pranav.applock.data.repository.BackendImplementation
 import dev.pranav.applock.features.admin.AdminDisableActivity
 import dev.pranav.applock.services.ShizukuAppLockService
 import dev.pranav.applock.services.UsageLockService
-import dev.pranav.applock.ui.components.DonateButton
 import dev.pranav.applock.ui.icons.*
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
@@ -77,7 +74,6 @@ fun SettingsScreen(
     val context = LocalContext.current
     val appLockRepository = remember { AppLockRepository(context) }
 
-    var showDialog by remember { mutableStateOf(false) }
     var showUnlockTimeDialog by remember { mutableStateOf(false) }
 
     val shizukuPermissionLauncher = rememberLauncherForActivityResult(
@@ -198,35 +194,6 @@ fun SettingsScreen(
 
             else -> backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
-    }
-
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text(stringResource(R.string.settings_screen_support_development_dialog_title)) },
-            text = { Text(stringResource(R.string.support_development_text)) },
-            confirmButton = {
-                FilledTonalButton(
-                    onClick = {
-                        context.startActivity(
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                "https://pranavpurwar.github.io/donate.html".toUri()
-                            )
-                        )
-                        showDialog = false
-                    }
-                ) {
-                    Text(stringResource(R.string.settings_screen_support_development_donate_button))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDialog = false }) {
-                    Text(stringResource(R.string.cancel_button))
-                }
-            },
-            containerColor = MaterialTheme.colorScheme.surface
-        )
     }
 
     if (showUnlockTimeDialog) {
@@ -405,10 +372,6 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)
                 )
-            }
-
-            item {
-                DonateButton()
             }
 
             item {
@@ -740,10 +703,6 @@ fun SettingsScreen(
                     context = context,
                     shizukuPermissionLauncher = shizukuPermissionLauncher
                 )
-            }
-
-            item {
-                LinksSection()
             }
         }
     }
@@ -1490,102 +1449,4 @@ private fun copyTokenToClipboard(context: Context, token: String) {
         }
     }
     clipboard.setPrimaryClip(clip)
-}
-
-@Composable
-fun LinksSection() {
-    val context = LocalContext.current
-
-    Column {
-        SectionTitle(text = "Links")
-
-        Column {
-            SettingsCard(index = 0, listSize = 3) {
-                LinkItem(
-                    title = "Discord Community",
-                    icon = Discord,
-                    onClick = {
-                        val intent = Intent(
-                            Intent.ACTION_VIEW,
-                            "https://discord.gg/46wCMRVAre".toUri()
-                        )
-                        context.startActivity(intent)
-                    }
-                )
-            }
-
-            SettingsCard(index = 1, listSize = 3) {
-                LinkItem(
-                    title = "Source Code",
-                    icon = Icons.Outlined.Code,
-                    onClick = {
-                        val intent = Intent(
-                            Intent.ACTION_VIEW,
-                            "https://github.com/aload0/AppLock".toUri()
-                        )
-                        context.startActivity(intent)
-                    }
-                )
-            }
-
-            SettingsCard(index = 2, listSize = 3) {
-                LinkItem(
-                    title = "Report Issue",
-                    icon = Icons.Outlined.BugReport,
-                    onClick = {
-                        val intent = Intent(
-                            Intent.ACTION_VIEW,
-                            "https://github.com/aload0/AppLock/issues".toUri()
-                        )
-                        context.startActivity(intent)
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun LinkItem(
-    title: String,
-    icon: ImageVector,
-    onClick: () -> Unit
-) {
-    ListItem(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(vertical = 2.dp, horizontal = 4.dp),
-        headlineContent = {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium
-            )
-        },
-        leadingContent = {
-            Box(
-                modifier = Modifier.size(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.secondary
-                )
-            }
-        },
-        trailingContent = {
-            Box(
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                    contentDescription = null
-                )
-            }
-        },
-        colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent
-        )
-    )
 }
