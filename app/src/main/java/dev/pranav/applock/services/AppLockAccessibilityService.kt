@@ -16,6 +16,7 @@ import android.widget.Toast
 import androidx.core.content.getSystemService
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.utils.LogUtils
+import dev.pranav.applock.core.utils.PhoneLocker
 import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.core.utils.canAuthenticateBiometrics
 import dev.pranav.applock.core.utils.enableAccessibilityServiceWithShizuku
@@ -25,6 +26,7 @@ import dev.pranav.applock.features.lockscreen.ui.LockScreenOverlayManager
 import dev.pranav.applock.features.lockscreen.ui.startBiometricPrompt
 import dev.pranav.applock.services.AppLockConstants.ACCESSIBILITY_SETTINGS_CLASSES
 import dev.pranav.applock.services.AppLockConstants.EXCLUDED_APPS
+import java.lang.ref.WeakReference
 import rikka.shizuku.Shizuku
 
 @SuppressLint("AccessibilityPolicy")
@@ -66,6 +68,15 @@ class AppLockAccessibilityService : AccessibilityService() {
 
         @Volatile
         var isServiceRunning = false
+
+        // The service while Android has it connected. Its lock action only works through that
+        // connection, which Android drops before it unbinds, so this is cleared on unbind.
+        @Volatile
+        private var connected: WeakReference<AppLockAccessibilityService>? = null
+
+        /** The connected service, for [PhoneLocker]; null once Android has let go of it. */
+        val connectedInstance: AppLockAccessibilityService?
+            get() = connected?.get()
     }
 
     private val screenStateReceiver = object: android.content.BroadcastReceiver() {
@@ -119,6 +130,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             }
 
+            connected = WeakReference(this)
             Log.d(TAG, "Accessibility service connected")
             appLockRepository.setActiveBackend(BackendImplementation.ACCESSIBILITY)
         } catch (e: Exception) {
@@ -429,14 +441,14 @@ class AppLockAccessibilityService : AccessibilityService() {
         // Check if user is trying to deactivate the accessibility service
         if (isDeactivationAttempt(event)) {
             Log.d(TAG, "Blocking accessibility service deactivation")
-            blockDeactivationAttempt()
+            blockDeactivationAttempt("accessibility settings page")
             return
         }
 
         // Check if user reached our own App info page (Uninstall / Force stop / Clear data live here)
         if (isOwnAppInfoPage(event)) {
             Log.d(TAG, "Blocking own app info page")
-            blockDeactivationAttempt()
+            blockDeactivationAttempt("app info page")
             return
         }
 
@@ -494,11 +506,11 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     @SuppressLint("InlinedApi")
-    private fun blockDeactivationAttempt() {
+    private fun blockDeactivationAttempt(reason: String) {
         try {
             performGlobalAction(GLOBAL_ACTION_BACK)
             performGlobalAction(GLOBAL_ACTION_HOME)
-            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+            PhoneLocker.lockPhone(this, reason)
         } catch (e: Exception) {
             logError("Error blocking deactivation attempt", e)
         }
@@ -534,7 +546,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 performGlobalAction(GLOBAL_ACTION_HOME)
                 Thread.sleep(100)
-                performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+                PhoneLocker.lockPhone(this, "device admin page")
                 Toast.makeText(
                     this,
                     "This action isn't allowed.",
@@ -617,6 +629,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         return try {
             Log.d(TAG, "Accessibility service unbound")
             isServiceRunning = false
+            connected = null
 
             if (Shizuku.pingBinder() && appLockRepository.isAntiUninstallEnabled()) {
                 enableAccessibilityServiceWithShizuku(ComponentName(packageName, javaClass.name))
@@ -633,6 +646,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         try {
             super.onDestroy()
             isServiceRunning = false
+            connected = null
             LogUtils.d(TAG, "Accessibility service destroyed")
 
             AppLockManager.lockScreenHost = null

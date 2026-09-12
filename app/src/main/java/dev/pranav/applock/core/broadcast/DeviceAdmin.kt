@@ -1,14 +1,34 @@
 package dev.pranav.applock.core.broadcast
 
+import android.app.admin.DeviceAdminInfo
 import android.app.admin.DeviceAdminReceiver
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import androidx.core.content.getSystemService
 
 class DeviceAdmin : DeviceAdminReceiver() {
     companion object {
         private const val PREFS_NAME = "dev.pranav.applock.admin_prefs"
         private const val KEY_PASSWORD_VERIFIED = "password_verified"
+
+        /**
+         * True when our admin is active and holds the force-lock policy, so
+         * [DevicePolicyManager.lockNow] can lock the phone.
+         */
+        fun hasForceLock(context: Context): Boolean {
+            val dpm = context.getSystemService<DevicePolicyManager>() ?: return false
+            val component = ComponentName(context, DeviceAdmin::class.java)
+            return try {
+                dpm.isAdminActive(component) &&
+                        dpm.hasGrantedPolicy(component, DeviceAdminInfo.USES_POLICY_FORCE_LOCK)
+            } catch (_: SecurityException) {
+                // The admin was removed between the two calls.
+                false
+            }
+        }
     }
 
     /**
