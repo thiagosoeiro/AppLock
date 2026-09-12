@@ -145,5 +145,9 @@ trusted network or not. `QUERY_PROTECTION_STATE` and `PROTECTION_STATE` report t
 
 - Networks are matched by name. Someone holding your unlocked phone could name a hotspot the same,
   connect the phone to it, and open locked apps.
-- As you walk away, Wi-Fi stays connected until the signal drops, and locked apps keep opening
-  until then.
+- Trust follows the Wi-Fi connection, not which network carries your internet. Near the edge of
+  range the phone can stay connected to a trusted network at one bar while it uses mobile data.
+  Until the Wi-Fi disconnects, locked apps keep opening and the shield keeps showing **HOME**. The
+  screen-on check doesn't catch this, because the phone really is still connected. Walking on ends
+  it once the Wi-Fi drops; staying within range, say just outside or in a building's shared areas,
+  keeps it going.
