@@ -70,6 +70,9 @@ class AppLockAccessibilityService : AccessibilityService() {
         checkGuardedPageContent()
     }
 
+    // When a guard last locked the phone; see [isRepeatBlock].
+    private var lastBlockAt = 0L
+
     private var overlayManager: LockScreenOverlayManager? = null
     private lateinit var mainHandler: Handler
 
@@ -93,6 +96,9 @@ class AppLockAccessibilityService : AccessibilityService() {
         // How close together the installer's uninstall screen and our name must appear, either order.
         private const val INSTALLER_UNINSTALL_WINDOW_MS = 3_000L
 
+        // After a guard locks the phone, how long it ignores the same attempt matching again.
+        private const val BLOCK_REPEAT_WINDOW_MS = 2_000L
+
         @Volatile
         var isServiceRunning = false
 
@@ -113,6 +119,9 @@ class AppLockAccessibilityService : AccessibilityService() {
                     LogUtils.d(TAG, "Screen off detected. Resetting AppLock state.")
                     AppLockManager.isLockScreenShown.set(false)
                     AppLockManager.clearAllUnlockStates()
+                } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                    // Unlocked: a guard matching from now on is a new attempt, not a repeat.
+                    lastBlockAt = 0L
                 }
             } catch (e: Exception) {
                 logError("Error in screenStateReceiver", e)
@@ -622,6 +631,19 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * True when a guard locked the phone moments ago; otherwise records this lock. Settings often
+     * reports a page twice within a few milliseconds, and acting on both repeated Back, the lock and
+     * Home, which once turned the screen off, on and off again. Unlocking ends the window, so a page
+     * opened after unlocking is guarded again at once.
+     */
+    private fun isRepeatBlock(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (lastBlockAt != 0L && now - lastBlockAt < BLOCK_REPEAT_WINDOW_MS) return true
+        lastBlockAt = now
+        return false
+    }
+
+    /**
      * Leaves the page and locks the phone. Back comes first, so the page is gone before the lock and
      * unlocking doesn't land on it and lock again. Home waits until after the lock, since stopping
      * the attempt doesn't depend on it.
@@ -629,6 +651,7 @@ class AppLockAccessibilityService : AccessibilityService() {
     @SuppressLint("InlinedApi")
     private fun blockDeactivationAttempt(reason: String) {
         stopGuardedPageChecks()
+        if (isRepeatBlock()) return
         try {
             performGlobalAction(GLOBAL_ACTION_BACK)
             PhoneLocker.lockPhone(this, reason)
@@ -660,6 +683,7 @@ class AppLockAccessibilityService : AccessibilityService() {
             val component = ComponentName(this, DeviceAdmin::class.java)
 
             if (dpm?.isAdminActive(component) == true) {
+                if (isRepeatBlock()) return
                 // Same order as blockDeactivationAttempt, without the old 100 ms pause before locking.
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 PhoneLocker.lockPhone(this, "device admin page")
