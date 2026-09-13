@@ -95,9 +95,9 @@ can't get past it.
   you off it too.
 - **Bounces can still lose to a very fast tap.** Each page is checked as it opens and for about a
   second while it finishes drawing. The locks above cover a tap that gets through first.
-- **The uninstall dialog check depends on the installer's screen names.** It only fires within a few
-  seconds of the package installer opening an uninstall screen, so installing an update isn't
-  blocked. If a phone's installer names its screens differently it doesn't fire; the security log
+- **The uninstall dialog check depends on the installer's screen names.** It only fires when the
+  package installer opens an uninstall screen within a few seconds of showing our name, so
+  installing an update isn't blocked. If a phone's installer names its screens differently it doesn't fire; the security log
   records the names it saw.
 - **Not tamper-proof.** A determined attacker with `adb`, recovery, or safe mode can still remove
   the app. This raises the bar against an opportunistic thief, not a forensic one.

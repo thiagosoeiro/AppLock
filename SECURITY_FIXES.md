@@ -15,7 +15,7 @@ closing it.
 | 1 — Quick fixes | F5, F8, F19, F20 | `fix/security-quick-fixes` | [#5](https://github.com/thiagosoeiro/AppLock/pull/5) | green (`8aff4bd`) | done | `1a77897` |
 | 2 — Rate limiting | F4 | `fix/security-rate-limiting` | [#6](https://github.com/thiagosoeiro/AppLock/pull/6) | green (`8f790a9`) | LGTM | `fa1e06b` |
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
-| 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | pending | pending | — |
+| 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`4b2e651`) | first pass | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -153,10 +153,27 @@ the app uninstalled on the phone, because the screen locked too late. PR #13, on
   - Settings pages are checked as they open, at 150 and 400 ms and after content changes, for up to
     a second, reading the window once per check.
   - Blocks go Back, lock, Home, with no pause (part of F12).
-  - The uninstall-dialog check can run again (F9), but only within 3 s of the installer opening an
-    uninstall screen, so installing an update isn't blocked.
-- **Not checked on a phone yet.** The Android behaviour it relies on was read from AOSP, and One UI
-  may differ.
+  - The uninstall-dialog check can run again (F9), but only when an uninstall screen and our name
+    appear within 3 s of each other, so installing an update isn't blocked.
+- **First phone test** (2026-09-12, Galaxy S24 Ultra, One UI 8.5):
+  - The device admin page (`SecDeviceAdminAdd` on One UI) locked 8–14 ms after it opened, and the
+    Accessibility page 5–9 ms after, so the Deactivate button and the switch were never reachable.
+    The Deactivate-tap, admin-removed and accessibility-off locks therefore didn't get to run.
+  - App info → Uninstall went through the device admin page, which locked. An uninstall started
+    elsewhere was refused by Android because the admin was active.
+  - The uninstall-dialog check missed: on One UI the installer's dialog event comes about 450 ms
+    before its uninstall screen.
+  - The Accessibility page locked twice each time, because Settings reports it twice.
+  - A locked app once opened its lock screen 4 times at once, with 4 fingerprint prompts.
+  - App info didn't bounce when opened: One UI keeps the version off screen, so that check never
+    matches, a limit since `5d9935c`.
+- **Changed after the test**, one commit each:
+  - the uninstall screen and our name count in either order, within 3 s;
+  - a guard ignores repeat matches for 2 s after locking, or until the phone is unlocked;
+  - a lock screen claims its flag before opening, so a burst of events opens one;
+  - clearing unlock state does nothing, and logs nothing, when nothing is unlocked;
+  - Settings pages showing our name log their view IDs, to find a way to recognise App info on
+    One UI.
 
 ## Testing chunks 2 and 3
 
