@@ -57,11 +57,12 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     // Anti-uninstall's view of the last page Settings or the package installer opened: which one it
     // is, until when its content is still being checked, and when the installer last opened an
-    // uninstall screen, which says whether its dialog is about uninstalling.
+    // uninstall screen and last showed our name, which together say it is about uninstalling us.
     private var guardedPagePackage = ""
     private var guardedPageClass = ""
     private var guardedPageCheckUntil = 0L
     private var installerUninstallScreenAt = 0L
+    private var installerOurNameAt = 0L
     private var guardedPageContentCheckPosted = false
     private val guardedPageRecheck = Runnable { checkGuardedPageContent() }
     private val guardedPageContentCheck = Runnable {
@@ -89,7 +90,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         private const val GUARDED_PAGE_CHECK_WINDOW_MS = 1_000L
         private const val GUARDED_PAGE_CONTENT_CHECK_DELAY_MS = 50L
 
-        // How soon after the package installer opens an uninstall screen its dialog must appear.
+        // How close together the installer's uninstall screen and our name must appear, either order.
         private const val INSTALLER_UNINSTALL_WINDOW_MS = 3_000L
 
         @Volatile
@@ -497,11 +498,17 @@ class AppLockAccessibilityService : AccessibilityService() {
         val className = event.className?.toString().orEmpty()
         guardedPagePackage = packageName
         guardedPageClass = className
-        if (className.contains(PACKAGE_INSTALLER_MARKER)) {
-            installerUninstallScreenAt =
-                if (className.contains("Uninstall", ignoreCase = true)) SystemClock.uptimeMillis() else 0L
+        val label = ownLabel
+        val showsOurName = event.text.any { it.contains(label) }
+        if (packageName.contains(PACKAGE_INSTALLER_MARKER)) {
+            val now = SystemClock.uptimeMillis()
+            if (className.contains(PACKAGE_INSTALLER_MARKER)) {
+                installerUninstallScreenAt =
+                    if (className.contains("Uninstall", ignoreCase = true)) now else 0L
+            }
+            if (showsOurName) installerOurNameAt = now
         }
-        LogUtils.d(TAG, "Anti-uninstall sees $packageName / $className")
+        LogUtils.d(TAG, "Anti-uninstall sees $packageName / $className, our name in it: $showsOurName")
 
         if (isAccessibilityServicePage(event)) {
             Log.d(TAG, "Blocking accessibility service deactivation")
@@ -509,8 +516,10 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
 
-        if (isOwnUninstallDialog(event)) {
+        if (isOwnUninstallDialog(packageName)) {
             Log.d(TAG, "Blocking the uninstall dialog")
+            installerUninstallScreenAt = 0L
+            installerOurNameAt = 0L
             blockDeactivationAttempt("uninstall dialog")
             return
         }
@@ -570,22 +579,22 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * The package installer asking to uninstall us. The installer shows our name in the same kind of
-     * dialog when installing an update to this app, which must not lock the phone, so this also needs
-     * the installer to have just opened an uninstall screen (UninstallerActivity or UninstallLaunch
-     * on stock Android). Fails open: if a phone's installer names its screens differently this
-     * doesn't fire, and the log shows the names it used.
+     * The package installer asking to uninstall us: an uninstall screen (UninstallerActivity or
+     * UninstallLaunch on stock Android) and an event showing our name, within a few seconds of each
+     * other in either order - on One UI the dialog's event comes about half a second before its
+     * UninstallLaunch screen. Our name alone isn't enough: the installer shows it in the same kind of
+     * dialog when installing an update to this app, which must not lock the phone. Fails open: if a
+     * phone's installer names its screens differently this doesn't fire, and the log shows the names
+     * it used.
      */
-    private fun isOwnUninstallDialog(event: AccessibilityEvent): Boolean {
-        if (event.packageName?.contains(PACKAGE_INSTALLER_MARKER) != true) return false
-        if (installerUninstallScreenAt == 0L ||
-            SystemClock.uptimeMillis() - installerUninstallScreenAt > INSTALLER_UNINSTALL_WINDOW_MS
-        ) {
-            return false
-        }
-        val label = ownLabel
-        return event.text.any { it.contains(label) }
+    private fun isOwnUninstallDialog(packageName: String): Boolean {
+        if (!packageName.contains(PACKAGE_INSTALLER_MARKER)) return false
+        val now = SystemClock.uptimeMillis()
+        return isRecent(installerUninstallScreenAt, now) && isRecent(installerOurNameAt, now)
     }
+
+    private fun isRecent(at: Long, now: Long): Boolean =
+        at != 0L && now - at <= INSTALLER_UNINSTALL_WINDOW_MS
 
     /**
      * True when the foreground window is our own App info page in Settings, where Uninstall, Force
