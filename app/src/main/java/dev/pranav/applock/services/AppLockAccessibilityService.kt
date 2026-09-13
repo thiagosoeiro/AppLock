@@ -415,8 +415,10 @@ class AppLockAccessibilityService : AccessibilityService() {
         autoPromptBiometrics: Boolean = true
     ) {
         // A lock screen returning from a cancelled prompt has to get through while the flag is
-        // still set - it is the same lock session, not a second one.
-        if (autoPromptBiometrics && AppLockManager.isLockScreenShown.get()) return
+        // still set - it is the same lock session, not a second one. A new session claims the flag
+        // here rather than in the post below: events for one app can arrive in a burst, and each
+        // would otherwise still see it clear and open its own lock screen and prompt.
+        if (autoPromptBiometrics && !AppLockManager.isLockScreenShown.compareAndSet(false, true)) return
 
         LogUtils.d(TAG, "Showing overlay for: $packageName")
 
