@@ -63,6 +63,9 @@ class AppLockAccessibilityService : AccessibilityService() {
     private var guardedPageCheckUntil = 0L
     private var installerUninstallScreenAt = 0L
     private var installerOurNameAt = 0L
+
+    // Whether the open Settings page has been described in the log; see [describePageShowingOurName].
+    private var guardedPageDescribed = false
     private var guardedPageContentCheckPosted = false
     private val guardedPageRecheck = Runnable { checkGuardedPageContent() }
     private val guardedPageContentCheck = Runnable {
@@ -166,7 +169,9 @@ class AppLockAccessibilityService : AccessibilityService() {
                 // which could drop the event for a guarded page opening.
                 notificationTimeout = 0L
                 packageNames = null
-                flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                // View IDs let the anti-uninstall diagnostics say how Settings built a page.
+                flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                        AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
             }
 
             connected = WeakReference(this)
@@ -509,6 +514,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         val className = event.className?.toString().orEmpty()
         guardedPagePackage = packageName
         guardedPageClass = className
+        guardedPageDescribed = false
         val label = ownLabel
         val showsOurName = event.text.any { it.contains(label) }
         if (packageName.contains(PACKAGE_INSTALLER_MARKER)) {
@@ -567,7 +573,50 @@ class AppLockAccessibilityService : AccessibilityService() {
         if (isOwnAppInfoPage(root)) {
             Log.d(TAG, "Blocking own app info page")
             blockDeactivationAttempt("app info page")
+            return
         }
+        describePageShowingOurName(root)
+    }
+
+    /**
+     * Diagnostics for the App info check, which never fires on One UI: its App info page keeps the
+     * version off screen. For a Settings page that shows our name but isn't matched as App info,
+     * logs once per page how Settings built it - every view ID on screen, and which views hold our
+     * name - so a later change can tell App info from the lists our name appears in. View IDs and
+     * classes only, never page text, and only while logging is on.
+     */
+    private fun describePageShowingOurName(root: AccessibilityNodeInfo) {
+        if (guardedPageDescribed || !appLockRepository.isLoggingEnabled()) return
+
+        val label = ownLabel
+        val holdingOurName = mutableListOf<String>()
+        val ids = sortedSetOf<String>()
+
+        fun visit(node: AccessibilityNodeInfo) {
+            val id = node.viewIdResourceName
+            if (id != null) ids += id
+            if (node.text?.toString()?.contains(label, ignoreCase = true) == true) {
+                holdingOurName += "${id ?: "no id"} (${node.className})"
+            }
+            for (i in 0 until node.childCount) {
+                visit(node.getChild(i) ?: continue)
+            }
+        }
+
+        try {
+            visit(root)
+        } catch (e: Exception) {
+            logError("Error describing window content", e)
+            return
+        }
+        if (holdingOurName.isEmpty()) return
+
+        guardedPageDescribed = true
+        LogUtils.d(
+            TAG,
+            "Our name on $guardedPageClass, not matched as App info, in: " +
+                    "${holdingOurName.joinToString()}; view IDs on screen: ${ids.joinToString()}"
+        )
     }
 
     private fun stopGuardedPageChecks() {
