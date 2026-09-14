@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Warning
@@ -181,32 +180,6 @@ fun MainScreen(
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = stringResource(R.string.main_screen_settings_cd),
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            navController.navigate(Screen.TriggerExclusions.route) {
-                                launchSingleTop = true
-                            }
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Block,
-                            contentDescription = "Trigger exclusions",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            navController.navigate(Screen.AntiUninstall.route) {
-                                launchSingleTop = true
-                            }
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Lock,
-                            contentDescription = "Anti-Uninstall",
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
