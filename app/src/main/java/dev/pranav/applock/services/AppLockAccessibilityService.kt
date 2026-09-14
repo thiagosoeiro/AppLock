@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
+import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -16,6 +17,7 @@ import android.widget.Toast
 import androidx.core.content.getSystemService
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.utils.LogUtils
+import dev.pranav.applock.core.utils.PhoneLocker
 import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.core.utils.canAuthenticateBiometrics
 import dev.pranav.applock.core.utils.enableAccessibilityServiceWithShizuku
@@ -25,6 +27,7 @@ import dev.pranav.applock.features.lockscreen.ui.LockScreenOverlayManager
 import dev.pranav.applock.features.lockscreen.ui.startBiometricPrompt
 import dev.pranav.applock.services.AppLockConstants.ACCESSIBILITY_SETTINGS_CLASSES
 import dev.pranav.applock.services.AppLockConstants.EXCLUDED_APPS
+import java.lang.ref.WeakReference
 import rikka.shizuku.Shizuku
 
 @SuppressLint("AccessibilityPolicy")
@@ -52,6 +55,27 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     private var lastForegroundPackage = ""
 
+    // Anti-uninstall's view of the last page Settings or the package installer opened: which one it
+    // is, until when its content is still being checked, and when the installer last opened an
+    // uninstall screen and last showed our name, which together say it is about uninstalling us.
+    private var guardedPagePackage = ""
+    private var guardedPageClass = ""
+    private var guardedPageCheckUntil = 0L
+    private var installerUninstallScreenAt = 0L
+    private var installerOurNameAt = 0L
+
+    // Whether the open Settings page has been described in the log; see [describePageShowingOurName].
+    private var guardedPageDescribed = false
+    private var guardedPageContentCheckPosted = false
+    private val guardedPageRecheck = Runnable { checkGuardedPageContent() }
+    private val guardedPageContentCheck = Runnable {
+        guardedPageContentCheckPosted = false
+        checkGuardedPageContent()
+    }
+
+    // When a guard last locked the phone; see [isRepeatBlock].
+    private var lastBlockAt = 0L
+
     private var overlayManager: LockScreenOverlayManager? = null
     private lateinit var mainHandler: Handler
 
@@ -64,8 +88,37 @@ class AppLockAccessibilityService : AccessibilityService() {
         private const val DEVICE_ADMIN_SETTINGS_PACKAGE = "com.android.settings"
         private const val APP_PACKAGE_PREFIX = "dev.pranav.applock"
 
+        // Part of every package installer's package name, which differs between phones.
+        private const val PACKAGE_INSTALLER_MARKER = "packageinstaller"
+
+        // After a Settings page opens, how long anti-uninstall keeps checking its content, and how
+        // soon after a content change it checks again.
+        private const val GUARDED_PAGE_CHECK_WINDOW_MS = 1_000L
+        private const val GUARDED_PAGE_CONTENT_CHECK_DELAY_MS = 50L
+
+        // How close together the installer's uninstall screen and our name must appear, either order.
+        private const val INSTALLER_UNINSTALL_WINDOW_MS = 3_000L
+
+        // View IDs that mark the App info page, from a One UI 8.5 log: the header holds the app name
+        // and the page has an Uninstall button. The apps list has neither. Matched as substrings, so
+        // the "com.android.settings:id/" prefix is not assumed.
+        private const val APP_INFO_HEADER_ID = "entity_header_title"
+        private const val APP_INFO_UNINSTALL_ID = "uninstall_button"
+
+        // After a guard locks the phone, how long it ignores the same attempt matching again.
+        private const val BLOCK_REPEAT_WINDOW_MS = 2_000L
+
         @Volatile
         var isServiceRunning = false
+
+        // The service while Android has it connected. Its lock action only works through that
+        // connection, which Android drops before it unbinds, so this is cleared on unbind.
+        @Volatile
+        private var connected: WeakReference<AppLockAccessibilityService>? = null
+
+        /** The connected service, for [PhoneLocker]; null once Android has let go of it. */
+        val connectedInstance: AppLockAccessibilityService?
+            get() = connected?.get()
     }
 
     private val screenStateReceiver = object: android.content.BroadcastReceiver() {
@@ -75,6 +128,9 @@ class AppLockAccessibilityService : AccessibilityService() {
                     LogUtils.d(TAG, "Screen off detected. Resetting AppLock state.")
                     AppLockManager.isLockScreenShown.set(false)
                     AppLockManager.clearAllUnlockStates()
+                } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                    // Unlocked: a guard matching from now on is a new attempt, not a repeat.
+                    lastBlockAt = 0L
                 }
             } catch (e: Exception) {
                 logError("Error in screenStateReceiver", e)
@@ -115,10 +171,16 @@ class AppLockAccessibilityService : AccessibilityService() {
                         AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
                         AccessibilityEvent.TYPE_WINDOWS_CHANGED
                 feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+                // No delay: Android holds events this long and keeps only the newest of each type,
+                // which could drop the event for a guarded page opening.
+                notificationTimeout = 0L
                 packageNames = null
-                flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                // View IDs let the anti-uninstall diagnostics say how Settings built a page.
+                flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                        AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
             }
 
+            connected = WeakReference(this)
             Log.d(TAG, "Accessibility service connected")
             appLockRepository.setActiveBackend(BackendImplementation.ACCESSIBILITY)
         } catch (e: Exception) {
@@ -135,9 +197,7 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     private fun handleAccessibilityEvent(event: AccessibilityEvent) {
-        if (appLockRepository.isAntiUninstallEnabled() &&
-            event.packageName == DEVICE_ADMIN_SETTINGS_PACKAGE
-        ) {
+        if (appLockRepository.isAntiUninstallEnabled() && isGuardedPackage(event.packageName)) {
             checkForDeviceAdminDeactivation(event)
         }
 
@@ -366,8 +426,10 @@ class AppLockAccessibilityService : AccessibilityService() {
         autoPromptBiometrics: Boolean = true
     ) {
         // A lock screen returning from a cancelled prompt has to get through while the flag is
-        // still set - it is the same lock session, not a second one.
-        if (autoPromptBiometrics && AppLockManager.isLockScreenShown.get()) return
+        // still set - it is the same lock session, not a second one. A new session claims the flag
+        // here rather than in the post below: events for one app can arrive in a burst, and each
+        // would otherwise still see it clear and open its own lock screen and prompt.
+        if (autoPromptBiometrics && !AppLockManager.isLockScreenShown.compareAndSet(false, true)) return
 
         LogUtils.d(TAG, "Showing overlay for: $packageName")
 
@@ -423,47 +485,183 @@ class AppLockAccessibilityService : AccessibilityService() {
     //    }
     //}
 
+    // Settings holds our App info, Accessibility and device admin pages; the package installer holds
+    // the uninstall dialog.
+    private fun isGuardedPackage(packageName: CharSequence?): Boolean =
+        packageName == DEVICE_ADMIN_SETTINGS_PACKAGE ||
+                packageName?.contains(PACKAGE_INSTALLER_MARKER) == true
+
     private fun checkForDeviceAdminDeactivation(event: AccessibilityEvent) {
-        Log.d(TAG, "Checking for device admin deactivation for event: $event")
+        val packageName = event.packageName?.toString() ?: return
 
-        // Check if user is trying to deactivate the accessibility service
-        if (isDeactivationAttempt(event)) {
-            Log.d(TAG, "Blocking accessibility service deactivation")
-            blockDeactivationAttempt()
-            return
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> checkGuardedPageOpened(event, packageName)
+
+            // More of the open page has been drawn: check it again shortly, once per burst.
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                if (packageName != guardedPagePackage ||
+                    SystemClock.uptimeMillis() > guardedPageCheckUntil ||
+                    guardedPageContentCheckPosted
+                ) return
+                guardedPageContentCheckPosted = true
+                mainHandler.postDelayed(guardedPageContentCheck, GUARDED_PAGE_CONTENT_CHECK_DELAY_MS)
+            }
         }
-
-        // Check if user reached our own App info page (Uninstall / Force stop / Clear data live here)
-        if (isOwnAppInfoPage(event)) {
-            Log.d(TAG, "Blocking own app info page")
-            blockDeactivationAttempt()
-            return
-        }
-
-        // Check if on the confirmation page for our own device admin
-        val isOwnDeviceAdminPage = isOwnDeviceAdminPage(event)
-
-        LogUtils.d(TAG, "User is on our device admin page: $isOwnDeviceAdminPage, $event")
-
-        if (!isOwnDeviceAdminPage) {
-            return
-        }
-
-        blockDeviceAdminDeactivation()
     }
 
-    private fun isDeactivationAttempt(event: AccessibilityEvent): Boolean {
+    /**
+     * A page or dialog opened in Settings or the package installer. Its event carries the class and
+     * title, which is enough for the Accessibility page and the uninstall dialog. App info and the
+     * device admin page are told apart by their content, which may be drawn after this event, so
+     * that is checked now, twice more shortly after, and on content changes, for up to a second.
+     */
+    private fun checkGuardedPageOpened(event: AccessibilityEvent, packageName: String) {
+        stopGuardedPageChecks()
+        val className = event.className?.toString().orEmpty()
+        guardedPagePackage = packageName
+        guardedPageClass = className
+        guardedPageDescribed = false
         val label = ownLabel
-        val isAccessibilitySettings = event.className in ACCESSIBILITY_SETTINGS_CLASSES &&
-                event.text.any { it.contains(label) }
-        val isSubSettings = event.className == "com.android.settings.SubSettings" &&
-                event.text.any { it.contains(label) }
-        val isAlertDialog =
-            event.packageName == "com.google.android.packageinstaller" && event.className == "android.app.AlertDialog" && event.text.toString()
-                .contains(label)
+        val showsOurName = event.text.any { it.contains(label) }
+        if (packageName.contains(PACKAGE_INSTALLER_MARKER)) {
+            val now = SystemClock.uptimeMillis()
+            if (className.contains(PACKAGE_INSTALLER_MARKER)) {
+                installerUninstallScreenAt =
+                    if (className.contains("Uninstall", ignoreCase = true)) now else 0L
+            }
+            if (showsOurName) installerOurNameAt = now
+        }
+        LogUtils.d(TAG, "Anti-uninstall sees $packageName / $className, our name in it: $showsOurName")
 
-        return isAccessibilitySettings || isSubSettings || isAlertDialog
+        if (isAccessibilityServicePage(event)) {
+            Log.d(TAG, "Blocking accessibility service deactivation")
+            blockDeactivationAttempt("accessibility settings page")
+            return
+        }
+
+        if (isOwnUninstallDialog(packageName)) {
+            Log.d(TAG, "Blocking the uninstall dialog")
+            installerUninstallScreenAt = 0L
+            installerOurNameAt = 0L
+            blockDeactivationAttempt("uninstall dialog")
+            return
+        }
+
+        if (packageName != DEVICE_ADMIN_SETTINGS_PACKAGE) return
+
+        guardedPageCheckUntil = SystemClock.uptimeMillis() + GUARDED_PAGE_CHECK_WINDOW_MS
+        mainHandler.postDelayed(guardedPageRecheck, 150)
+        mainHandler.postDelayed(guardedPageRecheck, 400)
+        checkGuardedPageContent()
     }
+
+    /** Looks for our device admin page or our App info page in the open Settings window. */
+    private fun checkGuardedPageContent() {
+        if (SystemClock.uptimeMillis() > guardedPageCheckUntil) return
+
+        // Until Settings' window is the active one its content can't be read; a later check will.
+        val root = rootInActiveWindow ?: return
+        if (root.packageName != DEVICE_ADMIN_SETTINGS_PACKAGE) return
+
+        if (guardedPageClass.contains("DeviceAdminAdd")) {
+            if (!isOwnDeviceAdminPage(root)) return
+            stopGuardedPageChecks()
+
+            // The app opens this same page itself to grant the admin or force-lock; let that through.
+            if (DeviceAdmin.isOwnGrantPending(this)) {
+                LogUtils.d(TAG, "Not blocking our device admin page: the app opened it to grant admin")
+                return
+            }
+            blockDeviceAdminDeactivation()
+            return
+        }
+
+        if (isOwnAppInfoPage(root)) {
+            Log.d(TAG, "Blocking own app info page")
+            blockDeactivationAttempt("app info page")
+            return
+        }
+        describePageShowingOurName(root)
+    }
+
+    /**
+     * Diagnostics for [isOwnAppInfoPage]. For a Settings page that shows our name but isn't matched
+     * as App info - an app list, or an App info page an OEM builds differently - logs once per page
+     * how Settings built it: every view ID on screen, and which views hold our name. That is what
+     * turned up [APP_INFO_HEADER_ID] and [APP_INFO_UNINSTALL_ID] on One UI, and would show a further
+     * OEM's ids if the check misses there. View IDs and classes only, never page text, and only
+     * while logging is on.
+     */
+    private fun describePageShowingOurName(root: AccessibilityNodeInfo) {
+        if (guardedPageDescribed || !appLockRepository.isLoggingEnabled()) return
+
+        val label = ownLabel
+        val holdingOurName = mutableListOf<String>()
+        val ids = sortedSetOf<String>()
+
+        fun visit(node: AccessibilityNodeInfo) {
+            val id = node.viewIdResourceName
+            if (id != null) ids += id
+            if (node.text?.toString()?.contains(label, ignoreCase = true) == true) {
+                holdingOurName += "${id ?: "no id"} (${node.className})"
+            }
+            for (i in 0 until node.childCount) {
+                visit(node.getChild(i) ?: continue)
+            }
+        }
+
+        try {
+            visit(root)
+        } catch (e: Exception) {
+            logError("Error describing window content", e)
+            return
+        }
+        if (holdingOurName.isEmpty()) return
+
+        guardedPageDescribed = true
+        LogUtils.d(
+            TAG,
+            "Our name on $guardedPageClass, not matched as App info, in: " +
+                    "${holdingOurName.joinToString()}; view IDs on screen: ${ids.joinToString()}"
+        )
+    }
+
+    private fun stopGuardedPageChecks() {
+        guardedPageCheckUntil = 0L
+        guardedPageContentCheckPosted = false
+        mainHandler.removeCallbacks(guardedPageRecheck)
+        mainHandler.removeCallbacks(guardedPageContentCheck)
+    }
+
+    // Our service's page in Accessibility settings, which Settings titles with our name.
+    private fun isAccessibilityServicePage(event: AccessibilityEvent): Boolean {
+        val className = event.className?.toString() ?: return false
+        if (className !in ACCESSIBILITY_SETTINGS_CLASSES &&
+            className != "com.android.settings.SubSettings"
+        ) {
+            return false
+        }
+        val label = ownLabel
+        return event.text.any { it.contains(label) }
+    }
+
+    /**
+     * The package installer asking to uninstall us: an uninstall screen (UninstallerActivity or
+     * UninstallLaunch on stock Android) and an event showing our name, within a few seconds of each
+     * other in either order - on One UI the dialog's event comes about half a second before its
+     * UninstallLaunch screen. Our name alone isn't enough: the installer shows it in the same kind of
+     * dialog when installing an update to this app, which must not lock the phone. Fails open: if a
+     * phone's installer names its screens differently this doesn't fire, and the log shows the names
+     * it used.
+     */
+    private fun isOwnUninstallDialog(packageName: String): Boolean {
+        if (!packageName.contains(PACKAGE_INSTALLER_MARKER)) return false
+        val now = SystemClock.uptimeMillis()
+        return isRecent(installerUninstallScreenAt, now) && isRecent(installerOurNameAt, now)
+    }
+
+    private fun isRecent(at: Long, now: Long): Boolean =
+        at != 0L && now - at <= INSTALLER_UNINSTALL_WINDOW_MS
 
     /**
      * True when the foreground window is our own App info page in Settings, where Uninstall, Force
@@ -475,38 +673,89 @@ class AppLockAccessibilityService : AccessibilityService() {
      *
      * Matching the name alone is not enough. The apps list and Accessibility > Installed apps are
      * windows that carry our name too, as one row among many, and returning to either restores the
-     * scroll position that shows it - which locked the phone while merely browsing Settings. So
-     * require our version number on screen as well: Settings prints it on the App info page, app
-     * lists never do, and a version needs no localised string to recognise.
+     * scroll position that shows it - which locked the phone while merely browsing Settings. Two
+     * shapes tell the App info page apart from those lists:
      *
-     * Fails open. If an OEM's page omits the version this does not fire, leaving that page
-     * unguarded rather than locking the phone on the wrong screen - and Uninstall and Force stop
-     * there are blocked and greyed out by device admin regardless.
+     * - **Our name plus our version.** Settings prints the version on the App info page and never in
+     *   an app list. Works across OEMs, but on One UI 8.5 the version is off screen until the page
+     *   is scrolled, so this alone missed it.
+     * - **Our name in the header, next to an Uninstall button.** From a One UI log: the App info
+     *   page holds the app name in [APP_INFO_HEADER_ID] and has an [APP_INFO_UNINSTALL_ID] button;
+     *   the apps list has neither. Requiring our name *in the header* keeps another app's App info
+     *   page from matching.
+     *
+     * Fails open. If neither shape is present this does not fire, leaving that page unguarded rather
+     * than locking the phone on the wrong screen - and Uninstall and Force stop there are blocked
+     * and greyed out by device admin regardless.
      */
-    private fun isOwnAppInfoPage(event: AccessibilityEvent): Boolean {
-        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return false
-        if (event.packageName != DEVICE_ADMIN_SETTINGS_PACKAGE) return false
-        if (ownVersionName.isEmpty()) return false
+    private fun isOwnAppInfoPage(root: AccessibilityNodeInfo): Boolean {
+        val label = ownLabel
+        val version = ownVersionName
+        var labelSeen = false
+        var versionSeen = false
+        var labelInHeader = false
+        var uninstallButtonSeen = false
 
-        val root = rootInActiveWindow ?: return false
-        return findNodeWithTextContaining(root, ownLabel) != null &&
-                findNodeWithTextContaining(root, ownVersionName) != null
+        fun visit(node: AccessibilityNodeInfo) {
+            val id = node.viewIdResourceName
+            val text = node.text?.toString()
+            if (text != null) {
+                if (text.contains(label, ignoreCase = true)) {
+                    labelSeen = true
+                    if (id?.contains(APP_INFO_HEADER_ID) == true) labelInHeader = true
+                }
+                if (version.isNotEmpty() && text.contains(version)) versionSeen = true
+            }
+            if (id?.contains(APP_INFO_UNINSTALL_ID) == true) uninstallButtonSeen = true
+            for (i in 0 until node.childCount) {
+                visit(node.getChild(i) ?: continue)
+            }
+        }
+
+        try {
+            visit(root)
+        } catch (e: Exception) {
+            logError("Error reading app info page", e)
+            return false
+        }
+
+        return (versionSeen && labelSeen) || (labelInHeader && uninstallButtonSeen)
     }
 
+    /**
+     * True when a guard locked the phone moments ago; otherwise records this lock. Settings often
+     * reports a page twice within a few milliseconds, and acting on both repeated Back, the lock and
+     * Home, which once turned the screen off, on and off again. Unlocking ends the window, so a page
+     * opened after unlocking is guarded again at once.
+     */
+    private fun isRepeatBlock(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (lastBlockAt != 0L && now - lastBlockAt < BLOCK_REPEAT_WINDOW_MS) return true
+        lastBlockAt = now
+        return false
+    }
+
+    /**
+     * Leaves the page and locks the phone. Back comes first, so the page is gone before the lock and
+     * unlocking doesn't land on it and lock again. Home waits until after the lock, since stopping
+     * the attempt doesn't depend on it.
+     */
     @SuppressLint("InlinedApi")
-    private fun blockDeactivationAttempt() {
+    private fun blockDeactivationAttempt(reason: String) {
+        stopGuardedPageChecks()
+        if (isRepeatBlock()) return
         try {
             performGlobalAction(GLOBAL_ACTION_BACK)
+            PhoneLocker.lockPhone(this, reason)
             performGlobalAction(GLOBAL_ACTION_HOME)
-            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         } catch (e: Exception) {
             logError("Error blocking deactivation attempt", e)
         }
     }
 
     /**
-     * True when the foreground window is the confirmation page for *our* device admin - the page
-     * carrying the button that deactivates it.
+     * True when [root], an open DeviceAdminAdd page (the caller checks the class), is the
+     * confirmation page for *our* device admin - the page carrying the button that deactivates it.
      *
      * Narrower than it was. It used to match on the class name alone, the device admin list
      * included, so opening that section or any other app's admin page bounced the user out.
@@ -516,12 +765,8 @@ class AppLockAccessibilityService : AccessibilityService() {
      * The old content-description branch is gone with it: it lowercased the text and then looked
      * for "Device admin app", so it could never match.
      */
-    private fun isOwnDeviceAdminPage(event: AccessibilityEvent): Boolean {
-        if (event.className?.contains("DeviceAdminAdd") != true) return false
-
-        val root = rootInActiveWindow ?: return false
-        return findNodeWithTextContaining(root, ownLabel) != null
-    }
+    private fun isOwnDeviceAdminPage(root: AccessibilityNodeInfo): Boolean =
+        findTexts(root, listOf(ownLabel)).isNotEmpty()
 
     @SuppressLint("InlinedApi")
     private fun blockDeviceAdminDeactivation() {
@@ -530,11 +775,11 @@ class AppLockAccessibilityService : AccessibilityService() {
             val component = ComponentName(this, DeviceAdmin::class.java)
 
             if (dpm?.isAdminActive(component) == true) {
+                if (isRepeatBlock()) return
+                // Same order as blockDeactivationAttempt, without the old 100 ms pause before locking.
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                performGlobalAction(GLOBAL_ACTION_BACK)
+                PhoneLocker.lockPhone(this, "device admin page")
                 performGlobalAction(GLOBAL_ACTION_HOME)
-                Thread.sleep(100)
-                performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
                 Toast.makeText(
                     this,
                     "This action isn't allowed.",
@@ -547,25 +792,31 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun findNodeWithTextContaining(
-        node: AccessibilityNodeInfo,
-        text: String
-    ): AccessibilityNodeInfo? {
-        return try {
-            if (node.text?.toString()?.contains(text, ignoreCase = true) == true) {
-                return node
-            }
+    /**
+     * Which of [wanted] appear in the text of [root] or any node under it, ignoring case. One walk
+     * covers all of them and stops once every one has been seen, since reading nodes can mean calls
+     * into the other app's process.
+     */
+    private fun findTexts(root: AccessibilityNodeInfo, wanted: List<String>): Set<String> {
+        val found = mutableSetOf<String>()
 
-            for (i in 0 until node.childCount) {
-                val child = node.getChild(i) ?: continue
-                val result = findNodeWithTextContaining(child, text)
-                if (result != null) return result
+        fun visit(node: AccessibilityNodeInfo) {
+            val text = node.text?.toString()
+            if (text != null) {
+                wanted.filterTo(found) { text.contains(it, ignoreCase = true) }
             }
-            null
-        } catch (e: Exception) {
-            logError("Error finding node with text: $text", e)
-            null
+            for (i in 0 until node.childCount) {
+                if (found.size == wanted.size) return
+                visit(node.getChild(i) ?: continue)
+            }
         }
+
+        try {
+            visit(root)
+        } catch (e: Exception) {
+            logError("Error reading window content", e)
+        }
+        return found
     }
 
     private fun getKeyboardPackageNames(): List<String> {
@@ -617,6 +868,14 @@ class AppLockAccessibilityService : AccessibilityService() {
         return try {
             Log.d(TAG, "Accessibility service unbound")
             isServiceRunning = false
+            connected = null
+
+            // Turning anti-uninstall off with the PIN clears the flag first, so the service going
+            // away with the flag still on means someone switched it off in Settings. Android has
+            // already dropped the connection, so this lock comes from device admin.
+            if (appLockRepository.isAntiUninstallEnabled()) {
+                PhoneLocker.lockPhone(this, "accessibility service turned off")
+            }
 
             if (Shizuku.pingBinder() && appLockRepository.isAntiUninstallEnabled()) {
                 enableAccessibilityServiceWithShizuku(ComponentName(packageName, javaClass.name))
@@ -633,10 +892,12 @@ class AppLockAccessibilityService : AccessibilityService() {
         try {
             super.onDestroy()
             isServiceRunning = false
+            connected = null
             LogUtils.d(TAG, "Accessibility service destroyed")
 
             AppLockManager.lockScreenHost = null
             overlayManager?.removeOverlay()
+            if (::mainHandler.isInitialized) stopGuardedPageChecks()
 
             try {
                 unregisterReceiver(screenStateReceiver)

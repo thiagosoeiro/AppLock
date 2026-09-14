@@ -1,8 +1,6 @@
 package dev.pranav.applock.features.applist.ui
 
 import android.annotation.SuppressLint
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -94,9 +92,6 @@ fun MainScreen(
                 val appLockRepository = context.appLockRepository()
                 val backend = appLockRepository.getBackendImplementation()
                 val isAntiUninstallEnabled = appLockRepository.isAntiUninstallEnabled()
-                val dpm =
-                    context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                val component = ComponentName(context, DeviceAdmin::class.java)
 
                 firstMissingPermission = when {
                     !Settings.canDrawOverlays(context) -> MissingPermission.OVERLAY
@@ -107,7 +102,8 @@ fun MainScreen(
                     )) -> MissingPermission.SHIZUKU
 
                     isAntiUninstallEnabled && !context.isAccessibilityServiceEnabled() -> MissingPermission.ACCESSIBILITY
-                    isAntiUninstallEnabled && !dpm.isAdminActive(component) -> MissingPermission.DEVICE_ADMIN
+                    // Also asks again when an admin granted before force-lock was added lacks it.
+                    isAntiUninstallEnabled && !DeviceAdmin.hasForceLock(context) -> MissingPermission.DEVICE_ADMIN
                     else -> null
                 }
             }
@@ -281,16 +277,7 @@ fun MainScreen(
                             }
 
                             MissingPermission.DEVICE_ADMIN -> {
-                                val component = ComponentName(context, DeviceAdmin::class.java)
-                                val intent =
-                                    Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                                        putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
-                                        putExtra(
-                                            DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                                            context.getString(R.string.main_screen_device_admin_explanation)
-                                        )
-                                    }
-                                context.startActivity(intent)
+                                DeviceAdmin.requestGrant(context)
                             }
                         }
                     }

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <device-admin>
     <uses-policies>
-
+        <!-- Lets anti-uninstall lock the phone with lockNow() when the accessibility service can't. -->
+        <force-lock />
     </uses-policies>
 </device-admin>

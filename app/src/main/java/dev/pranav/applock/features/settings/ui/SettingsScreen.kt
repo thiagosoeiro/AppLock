@@ -1,10 +1,8 @@
 package dev.pranav.applock.features.settings.ui
 
 import android.Manifest
-import android.app.admin.DevicePolicyManager
 import android.content.ClipData
 import android.content.ClipDescription
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -52,6 +50,7 @@ import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
+import dev.pranav.applock.core.utils.PhoneLocker
 import dev.pranav.applock.core.utils.canAuthenticateBiometrics
 import dev.pranav.applock.core.utils.hasUsagePermission
 import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
@@ -292,15 +291,7 @@ fun SettingsScreen(
             onDismiss = { showDeviceAdminDialog = false },
             onConfirm = {
                 showDeviceAdminDialog = false
-                val component = ComponentName(context, DeviceAdmin::class.java)
-                val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
-                    putExtra(
-                        DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                        context.getString(R.string.main_screen_device_admin_explanation)
-                    )
-                }
-                context.startActivity(intent)
+                DeviceAdmin.requestGrant(context)
             }
         )
     }
@@ -311,10 +302,7 @@ fun SettingsScreen(
             onConfirm = {
                 showAccessibilityDialog = false
                 openAccessibilitySettings(context)
-                val dpm =
-                    context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                val component = ComponentName(context, DeviceAdmin::class.java)
-                if (!dpm.isAdminActive(component)) {
+                if (!DeviceAdmin.hasForceLock(context)) {
                     showDeviceAdminDialog = true
                 }
             }
@@ -465,10 +453,8 @@ fun SettingsScreen(
                             enabled = true,
                             onCheckedChange = { isChecked ->
                                 if (isChecked) {
-                                    val dpm =
-                                        context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                                    val component = ComponentName(context, DeviceAdmin::class.java)
-                                    val hasDeviceAdmin = dpm.isAdminActive(component)
+                                    // An admin granted before force-lock was added needs granting again.
+                                    val hasDeviceAdmin = DeviceAdmin.hasForceLock(context)
                                     val hasAccessibility = context.isAccessibilityServiceEnabled()
 
                                     when {
@@ -632,7 +618,7 @@ fun SettingsScreen(
 
             item {
                 SettingsGroup(
-                    items = listOf(
+                    items = listOfNotNull(
                         ActionSettingItem(
                             icon = Icons.Outlined.Security,
                             title = stringResource(R.string.settings_Screen_export_audit),
@@ -692,7 +678,25 @@ fun SettingsScreen(
                                 appLockRepository.setLoggingEnabled(isChecked)
                                 LogUtils.setLoggingEnabled(isChecked)
                             }
-                        )
+                        ),
+                        // Troubleshooting only, so it comes and goes with the logging switch above.
+                        // Worth having at all because the lock it checks is otherwise silent: it
+                        // runs only while the accessibility service is going away, so nothing else
+                        // would show that it had stopped working.
+                        if (loggingEnabled) ActionSettingItem(
+                            icon = Icons.Default.Lock,
+                            title = stringResource(R.string.settings_screen_test_lock_title),
+                            subtitle = stringResource(R.string.settings_screen_test_lock_desc),
+                            onClick = {
+                                if (!PhoneLocker.lockWithDeviceAdmin(context, "test from settings")) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.settings_screen_test_lock_failed),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        ) else null
                     )
                 )
             }

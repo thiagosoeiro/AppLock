@@ -1,11 +1,12 @@
 # Security fixes
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
-before merging. The audit's findings table records the status of every finding, including the ones
-left open.
+before merging, and a fourth after anti-uninstall was beaten on the phone. The audit's findings
+table records the status of every finding, including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
-dropped as too complex.
+dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
+closing it.
 
 ## Status
 
@@ -14,6 +15,7 @@ dropped as too complex.
 | 1 — Quick fixes | F5, F8, F19, F20 | `fix/security-quick-fixes` | [#5](https://github.com/thiagosoeiro/AppLock/pull/5) | green (`8aff4bd`) | done | `1a77897` |
 | 2 — Rate limiting | F4 | `fix/security-rate-limiting` | [#6](https://github.com/thiagosoeiro/AppLock/pull/6) | green (`8f790a9`) | LGTM | `fa1e06b` |
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
+| 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`4b2e651`) | first pass | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -122,6 +124,82 @@ Merged in PR #7 after CI; signed off as LGTM. The same PR added this file and th
 - **Follow-ups noted, not done.** The main screen reads the protection state once, so the shield can
   still show ON after automation has turned protection off. And the log doesn't say whether a change
   came from the shield or from automation.
+
+## Chunk 4 — Anti-uninstall lock speed (in review)
+
+Not from the original scope. On 2026-09-12, with anti-uninstall on, device admin was deactivated and
+the app uninstalled on the phone, because the screen locked too late. PR #13, one commit per change.
+
+- **Why it lost.** Every lock came from the accessibility service reading a page once it was on
+  screen:
+  - events were held 100 ms, and could be dropped;
+  - a page not drawn yet was missed for good;
+  - the device admin block waited 100 ms, and did nothing once the admin was gone;
+  - `DeviceAdmin.onDisabled` cleared `anti_uninstall`, which switched every guard off.
+- **One way to lock** (`96468cf`). `PhoneLocker` tries the accessibility lock action, then
+  `DevicePolicyManager.lockNow()`, and logs which one locked and why.
+- **Admin callbacks** (`d631714`). `onDisableRequested` locks on the Deactivate tap and returns the
+  disguised admin description as a warning, so removal needs OK on a second prompt. `onDisabled`
+  locks, which for App info's one-tap "Deactivate and uninstall" happens before Android stops the
+  app, and leaves the flag on. Turning anti-uninstall off with the PIN clears the flag first.
+- **Force-lock** (`639afa7`). A new admin policy. Android keeps the policies granted at activation,
+  so the main screen and the Settings switch ask once for the admin again; for an active admin the
+  grant page only adds the policy. The guard leaves that page alone for a minute after the app opens
+  it, while the policy is still missing.
+- **Accessibility turned off** (`cf40ea4`). `onUnbind` locks through device admin, since Android has
+  already dropped the service's connection by then.
+- **Faster screen checks** (`462f341`).
+  - No event delay; this also reaches locked-app detection.
+  - Settings pages are checked as they open, at 150 and 400 ms and after content changes, for up to
+    a second, reading the window once per check.
+  - Blocks go Back, lock, Home, with no pause (part of F12).
+  - The uninstall-dialog check can run again (F9), but only when an uninstall screen and our name
+    appear within 3 s of each other, so installing an update isn't blocked.
+- **First phone test** (2026-09-12, Galaxy S24 Ultra, One UI 8.5):
+  - The device admin page (`SecDeviceAdminAdd` on One UI) locked 8–14 ms after it opened, and the
+    Accessibility page 5–9 ms after, so the Deactivate button and the switch were never reachable.
+    The Deactivate-tap, admin-removed and accessibility-off locks therefore didn't get to run.
+  - App info → Uninstall went through the device admin page, which locked. An uninstall started
+    elsewhere was refused by Android because the admin was active.
+  - The uninstall-dialog check missed: on One UI the installer's dialog event comes about 450 ms
+    before its uninstall screen.
+  - The Accessibility page locked twice each time, because Settings reports it twice.
+  - A locked app once opened its lock screen 4 times at once, with 4 fingerprint prompts.
+  - App info didn't bounce when opened: One UI keeps the version off screen, so that check never
+    matches, a limit since `5d9935c`.
+- **Changed after the test**, one commit each:
+  - the uninstall screen and our name count in either order, within 3 s;
+  - a guard ignores repeat matches for 2 s after locking, or until the phone is unlocked;
+  - a lock screen claims its flag before opening, so a burst of events opens one;
+  - clearing unlock state does nothing, and logs nothing, when nothing is unlocked;
+  - Settings pages showing our name log their view IDs, to find a way to recognise App info on
+    One UI.
+- **Second phone test** (2026-09-14, same phone): the Accessibility page locked once, a locked app
+  opened one lock screen, the apps list didn't lock, and "Cleared all unlock states" fell from 711
+  lines to 4. App info still only bounced after the version scrolled in, but the view-ID log showed
+  its header (`entity_header_title`) and `uninstall_button`, which the apps list lacks.
+- **Changed after the second test**, one commit: App info is recognised by our name in that header
+  next to an Uninstall button, as well as by name-plus-version, so it bounces on One UI without a
+  scroll.
+- **Third phone test** (2026-09-14): App info locked 42 ms after the page opened, with no scroll,
+  and the apps list still didn't lock. The uninstall dialog locked as well, confirming the
+  either-order match, and the device admin page locked twice.
+- **Device admin locking is proven** (2026-09-14). Every lock until then had gone through the
+  accessibility service, so the device admin path had never been seen working — and it is the only
+  path left once the accessibility service is going away. Settings → Advanced → **Test screen lock**,
+  which appears while Logging is on, calls that path on its own, and the log answered: "Locked the
+  phone through device admin: test from settings". Still unverified: that `onUnbind` fires when the service is switched off (the
+  volume-key accessibility shortcut would show it, since it never opens the guarded page),
+  reinstalling over the app, and the Deactivate-tap and admin-removed locks.
+- **Known gap, left as is.** After a guard locks, repeat matches are ignored for 2 s, so that
+  Settings reporting one page twice doesn't lock twice. That window is cleared when the phone is
+  unlocked — but the reappearing page and the unlock broadcast race each other, and if the page
+  wins it is taken for a duplicate and suppressed, leaving a second or two on that page unguarded.
+  In testing this made the Accessibility page's switch reachable once. Judged low priority: it only
+  helps someone who already knows the phone's PIN, who can get through every layer anyway (F18),
+  and device admin still blocks uninstall and still locks from the admin callbacks. The fix, if it
+  is ever worth it: also clear the window when the screen turns off, which our own lock causes at
+  once, so only the duplicates arriving before the screen is off are swallowed.
 
 ## Testing chunks 2 and 3
 

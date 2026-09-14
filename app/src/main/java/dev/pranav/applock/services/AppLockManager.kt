@@ -259,8 +259,14 @@ object AppLockManager {
     /**
      * Drops every unlock state at once. Used when protection is switched back on, so an app
      * left unlocked while protection was off does not stay open afterwards.
+     *
+     * The accessibility service also calls this on every event while the phone is locked, so it
+     * does nothing, and logs nothing, when nothing is unlocked or held for a return.
      */
     fun clearAllUnlockStates() {
+        if (temporarilyUnlockedApp.isEmpty() && appUnlockTimes.isEmpty() && pendingReturnApp.isEmpty()) {
+            return
+        }
         temporarilyUnlockedApp = ""
         appUnlockTimes.clear()
         pendingReturnApp = ""
