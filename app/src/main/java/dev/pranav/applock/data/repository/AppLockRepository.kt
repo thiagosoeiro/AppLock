@@ -175,5 +175,8 @@ enum class BackendImplementation {
 /** What an intruder alert records with the front camera. */
 enum class IntruderCaptureMode {
     PHOTO,
-    VIDEO
+    VIDEO,
+
+    /** The photo first, then the video, both attached to the one email. */
+    BOTH
 }

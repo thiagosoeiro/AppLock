@@ -35,9 +35,15 @@ Each alert is one email:
 - **Location**, if you turned it on: a Google Maps link with its accuracy and how old the fix
   is, or a short reason if there is none. It reuses the location permission trusted Wi-Fi
   already uses and Android's own providers, so it adds no permission.
-- **Capture:** a `photo.jpg` or a `video.mp4` attached. Video records with sound only if you
-  grant the microphone. If the capture failed — the camera was busy, a permission was
-  missing, the screen went off — the email is still sent and says why.
+- **Capture:** a `photo.jpg`, a `video.mp4`, or both, depending on the Capture setting. Video
+  records with sound only if you grant the microphone. If the capture failed — the camera was
+  busy, a permission was missing, the screen went off — the email is still sent and says why.
+
+With **Photo and video**, the photo is taken first and the video straight after, both attached
+to the one email. Taking the photo first means that if the camera is lost part way, because the
+screen went off or another app took it, the alert still carries something. If one of the two
+fails the other is still sent, and the email says which was missing and why. It keeps the camera
+busy for roughly ten seconds rather than two, so the indicator is up for longer.
 
 ## Setting it up
 

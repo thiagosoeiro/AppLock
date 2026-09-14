@@ -46,8 +46,9 @@ object IntruderSender {
                     to = to,
                     subject = SUBJECT,
                     text = alert.text,
-                    attachment = alert.attachment,
-                    attachmentName = alert.attachment?.let { attachmentName(it.extension) },
+                    attachments = alert.attachments.map {
+                        ResendClient.Attachment(it, attachmentName(it.extension))
+                    },
                     idempotencyKey = alert.id
                 )
                 when (result) {

@@ -238,7 +238,7 @@ fun SettingsScreen(
         if (IntruderCapture.hasCameraPermission(context)) {
             appLockRepository.setIntruderAlertsEnabled(true)
             intruderAlertsEnabled = true
-            if (intruderCaptureMode == IntruderCaptureMode.VIDEO &&
+            if (IntruderCapture.recordsVideo(intruderCaptureMode) &&
                 !IntruderCapture.hasMicrophonePermission(context)
             ) {
                 Toast.makeText(
@@ -266,7 +266,7 @@ fun SettingsScreen(
             }
 
             !IntruderCapture.hasCameraPermission(context) -> {
-                val permissions = if (intruderCaptureMode == IntruderCaptureMode.VIDEO) {
+                val permissions = if (IntruderCapture.recordsVideo(intruderCaptureMode)) {
                     arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
                 } else {
                     arrayOf(Manifest.permission.CAMERA)
@@ -313,7 +313,7 @@ fun SettingsScreen(
                 appLockRepository.setIntruderCaptureMode(mode)
                 showIntruderCaptureDialog = false
                 // Switching to video while it's already on: ask for the mic so sound works.
-                if (mode == IntruderCaptureMode.VIDEO && intruderAlertsEnabled &&
+                if (IntruderCapture.recordsVideo(mode) && intruderAlertsEnabled &&
                     !IntruderCapture.hasMicrophonePermission(context)
                 ) {
                     intruderPermissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
@@ -654,15 +654,10 @@ fun SettingsScreen(
                             }
                         ),
                         ActionSettingItem(
-                            icon = if (intruderCaptureMode == IntruderCaptureMode.VIDEO)
+                            icon = if (IntruderCapture.recordsVideo(intruderCaptureMode))
                                 Icons.Default.Videocam else Icons.Default.PhotoCamera,
                             title = stringResource(R.string.settings_screen_intruder_capture_title),
-                            subtitle = stringResource(
-                                if (intruderCaptureMode == IntruderCaptureMode.VIDEO)
-                                    R.string.settings_screen_intruder_capture_video
-                                else
-                                    R.string.settings_screen_intruder_capture_photo
-                            ),
+                            subtitle = stringResource(captureModeLabel(intruderCaptureMode)),
                             onClick = { showIntruderCaptureDialog = true }
                         ),
                         ActionSettingItem(
@@ -1665,6 +1660,13 @@ fun TrustedNetworksDialog(
     )
 }
 
+/** The Settings label for each capture mode. */
+private fun captureModeLabel(mode: IntruderCaptureMode): Int = when (mode) {
+    IntruderCaptureMode.PHOTO -> R.string.settings_screen_intruder_capture_photo
+    IntruderCaptureMode.VIDEO -> R.string.settings_screen_intruder_capture_video
+    IntruderCaptureMode.BOTH -> R.string.settings_screen_intruder_capture_both
+}
+
 @Composable
 fun IntruderCaptureModeDialog(
     selected: IntruderCaptureMode,
@@ -1677,12 +1679,7 @@ fun IntruderCaptureModeDialog(
         text = {
             Column {
                 IntruderCaptureMode.entries.forEach { mode ->
-                    val label = stringResource(
-                        if (mode == IntruderCaptureMode.VIDEO)
-                            R.string.settings_screen_intruder_capture_video
-                        else
-                            R.string.settings_screen_intruder_capture_photo
-                    )
+                    val label = stringResource(captureModeLabel(mode))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

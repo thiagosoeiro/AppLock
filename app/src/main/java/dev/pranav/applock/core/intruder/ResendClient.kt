@@ -12,10 +12,12 @@ import javax.net.ssl.HttpsURLConnection
  * Sends one email through Resend's API (https://resend.com/docs/api-reference/emails/send-email),
  * using only what Android already has, so the feature adds no library.
  *
- * The attachment is streamed into the request as Base64 instead of being built up in memory, since
- * a video can be several megabytes.
+ * Attachments are streamed into the request as Base64 instead of being built up in memory, since a
+ * video can be several megabytes.
  */
 class ResendClient(private val apiKey: String) {
+
+    data class Attachment(val file: File, val filename: String)
 
     sealed interface Result {
         data object Sent : Result
@@ -27,28 +29,27 @@ class ResendClient(private val apiKey: String) {
         data class Rejected(val reason: String) : Result
     }
 
+    /** A request written out in order: JSON text, with each attachment's bytes Base64'd in place. */
+    private sealed interface Part {
+        class Literal(val bytes: ByteArray) : Part
+        class Base64File(val file: File) : Part
+    }
+
     fun send(
         from: String,
         to: String,
         subject: String,
         text: String,
-        attachment: File?,
-        attachmentName: String?,
+        attachments: List<Attachment>,
         idempotencyKey: String
     ): Result {
-        val head = buildString {
-            append("{\"from\":").append(JSONObject.quote(from))
-            append(",\"to\":[").append(JSONObject.quote(to)).append(']')
-            append(",\"subject\":").append(JSONObject.quote(subject))
-            append(",\"text\":").append(JSONObject.quote(text))
-            if (attachment != null) {
-                append(",\"attachments\":[{\"filename\":")
-                append(JSONObject.quote(attachmentName ?: attachment.name))
-                append(",\"content\":\"")
+        val parts = buildParts(from, to, subject, text, attachments)
+        val contentLength = parts.sumOf { part ->
+            when (part) {
+                is Part.Literal -> part.bytes.size.toLong()
+                is Part.Base64File -> base64Length(part.file.length())
             }
-        }.toByteArray(Charsets.UTF_8)
-        val tail = (if (attachment != null) "\"}]}" else "}").toByteArray(Charsets.UTF_8)
-        val contentLength = head.size + base64Length(attachment?.length() ?: 0L) + tail.size
+        }
 
         return try {
             val connection = URL(ENDPOINT).openConnection() as HttpsURLConnection
@@ -65,13 +66,15 @@ class ResendClient(private val apiKey: String) {
                 connection.setRequestProperty("Idempotency-Key", idempotencyKey)
 
                 connection.outputStream.use { out ->
-                    out.write(head)
-                    if (attachment != null) {
-                        Base64OutputStream(out, Base64.NO_WRAP or Base64.NO_CLOSE).use { base64 ->
-                            attachment.inputStream().use { it.copyTo(base64) }
+                    parts.forEach { part ->
+                        when (part) {
+                            is Part.Literal -> out.write(part.bytes)
+                            is Part.Base64File -> {
+                                Base64OutputStream(out, Base64.NO_WRAP or Base64.NO_CLOSE)
+                                    .use { base64 -> part.file.inputStream().use { it.copyTo(base64) } }
+                            }
                         }
                     }
-                    out.write(tail)
                 }
 
                 val code = connection.responseCode
@@ -89,6 +92,39 @@ class ResendClient(private val apiKey: String) {
             Result.Retry("${e.javaClass.simpleName}: ${e.message}")
         }
     }
+
+    private fun buildParts(
+        from: String,
+        to: String,
+        subject: String,
+        text: String,
+        attachments: List<Attachment>
+    ): List<Part> = buildList {
+        val head = StringBuilder()
+            .append("{\"from\":").append(JSONObject.quote(from))
+            .append(",\"to\":[").append(JSONObject.quote(to)).append(']')
+            .append(",\"subject\":").append(JSONObject.quote(subject))
+            .append(",\"text\":").append(JSONObject.quote(text))
+
+        if (attachments.isEmpty()) {
+            add(literal(head.append('}').toString()))
+            return@buildList
+        }
+
+        add(literal(head.append(",\"attachments\":[").toString()))
+        attachments.forEachIndexed { index, attachment ->
+            val prefix = StringBuilder()
+            if (index > 0) prefix.append(',')
+            prefix.append("{\"filename\":").append(JSONObject.quote(attachment.filename))
+                .append(",\"content\":\"")
+            add(literal(prefix.toString()))
+            add(Part.Base64File(attachment.file))
+            add(literal("\"}"))
+        }
+        add(literal("]}"))
+    }
+
+    private fun literal(text: String): Part = Part.Literal(text.toByteArray(Charsets.UTF_8))
 
     /** Resend's explanation from an error response, or nothing if it gave none. */
     private fun errorMessage(connection: HttpsURLConnection): String {

@@ -1,12 +1,13 @@
 package dev.pranav.applock.core.intruder
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
 /**
- * Alerts waiting to be emailed. Each is `<id>.json`, holding the email text, plus `<id>.jpg` or
+ * Alerts waiting to be emailed. Each is `<id>.json`, holding the email text, plus `<id>.jpg` and/or
  * `<id>.mp4` when something was captured. They live in noBackupFilesDir, which Android never backs
  * up, and an alert is deleted as soon as Resend accepts it, so nothing stays on the phone after that.
  */
@@ -18,26 +19,27 @@ class IntruderOutbox(context: Context) {
         val id: String,
         val createdAt: Long,
         val text: String,
-        val attachment: File?
+        val attachments: List<File>
     )
 
     fun newId(): String = UUID.randomUUID().toString()
 
-    /** Where the capture for alert [id] is written, before [add] records the alert. */
+    /** Where a capture for alert [id] is written, before [add] records the alert. */
     fun captureFile(id: String, extension: String): File {
         synchronized(LOCK) { dir.mkdirs() }
         return File(dir, "$id.$extension")
     }
 
     /** Records an alert as waiting. The JSON is renamed into place, so it is never half written. */
-    fun add(id: String, createdAt: Long, text: String, attachment: File?) {
+    fun add(id: String, createdAt: Long, text: String, attachments: List<File>) {
         synchronized(LOCK) {
             dir.mkdirs()
             val json = JSONObject()
                 .put(FIELD_CREATED_AT, createdAt)
                 .put(FIELD_TEXT, text)
-            attachment?.takeIf { it.exists() && it.length() > 0 }?.let {
-                json.put(FIELD_ATTACHMENT, it.name)
+            val usable = attachments.filter { it.exists() && it.length() > 0 }
+            if (usable.isNotEmpty()) {
+                json.put(FIELD_ATTACHMENTS, JSONArray(usable.map { it.name }))
             }
 
             val temp = File(dir, "$id.json.tmp")
@@ -57,10 +59,10 @@ class IntruderOutbox(context: Context) {
 
     fun isEmpty(): Boolean = synchronized(LOCK) { jsonFiles().isEmpty() }
 
-    /** Deletes an alert and its capture. */
+    /** Deletes an alert and its captures. */
     fun remove(alert: Alert) {
         synchronized(LOCK) {
-            alert.attachment?.delete()
+            alert.attachments.forEach { it.delete() }
             File(dir, "${alert.id}.json").delete()
         }
     }
@@ -68,15 +70,18 @@ class IntruderOutbox(context: Context) {
     private fun read(file: File): Alert? {
         return try {
             val json = JSONObject(file.readText())
-            val attachment = json.optString(FIELD_ATTACHMENT)
-                .takeIf { it.isNotEmpty() }
-                ?.let { File(dir, it) }
-                ?.takeIf { it.exists() }
+            val names = json.optJSONArray(FIELD_ATTACHMENTS)
+            val attachments = buildList {
+                for (index in 0 until (names?.length() ?: 0)) {
+                    val attachment = File(dir, names!!.getString(index))
+                    if (attachment.exists() && attachment.length() > 0) add(attachment)
+                }
+            }
             Alert(
                 id = file.name.removeSuffix(".json"),
                 createdAt = json.getLong(FIELD_CREATED_AT),
                 text = json.getString(FIELD_TEXT),
-                attachment = attachment
+                attachments = attachments
             )
         } catch (_: Exception) {
             // It could never be sent.
@@ -119,7 +124,7 @@ class IntruderOutbox(context: Context) {
         private const val DIR_NAME = "intruder_outbox"
         private const val FIELD_CREATED_AT = "created_at"
         private const val FIELD_TEXT = "text"
-        private const val FIELD_ATTACHMENT = "attachment"
+        private const val FIELD_ATTACHMENTS = "attachments"
 
         private const val MAX_ALERTS = 10
         private const val MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L

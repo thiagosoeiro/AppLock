@@ -20,7 +20,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Turns a run of wrong PINs into an emailed alert: a front-camera photo or video, the phone's
+ * Turns a run of wrong PINs into an emailed alert: a front-camera photo, video or both, the phone's
  * location, and which app was being unlocked. This is items 8 and 13 of FUTURE_IMPROVEMENTS.md.
  *
  * The wrong-try count is the one [dev.pranav.applock.data.repository.UnlockAttemptLimiter] already
@@ -101,8 +101,9 @@ object IntruderAlerts {
             val (captured, location) = coroutineScope {
                 val captureTask = async {
                     if (IntruderCapture.hasCameraPermission(appContext)) {
-                        val file = outbox.captureFile(id, IntruderCapture.extensionFor(mode))
-                        IntruderCapture.capture(appContext, mode, file)
+                        IntruderCapture.capture(appContext, mode) { extension ->
+                            outbox.captureFile(id, extension)
+                        }
                     } else {
                         IntruderCapture.Result.Failed("camera permission not granted")
                     }
@@ -117,24 +118,27 @@ object IntruderAlerts {
                 captureTask.await() to locationTask.await()
             }
 
-            val attachment: File?
+            val attachments: List<File>
             val captureNote: String?
             when (captured) {
                 is IntruderCapture.Result.Captured -> {
-                    // The outbox only keeps a file with something in it, so the email must agree.
-                    attachment = captured.file.takeIf { it.exists() && it.length() > 0 }
-                    captureNote =
-                        if (attachment == null) "Capture failed: nothing was written" else captured.note
+                    // The outbox only keeps files with something in them, so the email must agree.
+                    attachments = captured.files.filter { it.exists() && it.length() > 0 }
+                    captureNote = when {
+                        attachments.isEmpty() -> "nothing was written"
+                        captured.notes.isEmpty() -> null
+                        else -> captured.notes.joinToString("; ")
+                    }
                 }
 
                 is IntruderCapture.Result.Failed -> {
-                    attachment = null
-                    captureNote = "Capture failed: ${captured.reason}"
+                    attachments = emptyList()
+                    captureNote = captured.reason
                 }
             }
 
-            val text = buildText(failureCount, lockedPackage, mode, captureNote, location)
-            outbox.add(id, createdAt, text, attachment)
+            val text = buildText(failureCount, lockedPackage, attachments, captureNote, location)
+            outbox.add(id, createdAt, text, attachments)
 
             val stillWaiting = IntruderSender.sendPending(appContext)
             if (stillWaiting || !outbox.isEmpty()) {
@@ -145,7 +149,7 @@ object IntruderAlerts {
     private fun buildText(
         failureCount: Int?,
         lockedPackage: String?,
-        mode: IntruderCaptureMode,
+        attachments: List<File>,
         captureNote: String?,
         location: String?
     ): String {
@@ -153,6 +157,9 @@ object IntruderAlerts {
         val local = LOCAL_FORMAT.withZone(ZoneId.systemDefault()).format(now)
         val utc = LOCAL_FORMAT.withZone(ZoneId.of("UTC")).format(now)
         val target = lockedPackage?.let(::appLabel) ?: "the app's own PIN screen"
+        val attached = attachments.map {
+            if (it.extension == IntruderOutbox.VIDEO_EXTENSION) "a video" else "a photo"
+        }
 
         return buildString {
             appendLine("A wrong code was entered on this phone.")
@@ -166,11 +173,11 @@ object IntruderAlerts {
                 appendLine("This is a test alert sent from Settings.")
             }
             location?.let { appendLine(it) }
-            val capture = when (mode) {
-                IntruderCaptureMode.PHOTO -> "photo"
-                IntruderCaptureMode.VIDEO -> "video"
+            when {
+                attached.isNotEmpty() -> appendLine("Attached: ${attached.joinToString(" and ")}.")
+                else -> appendLine("Nothing was captured.")
             }
-            appendLine(captureNote ?: "A $capture is attached.")
+            captureNote?.let { appendLine("Camera: $it") }
         }.trimEnd()
     }
 

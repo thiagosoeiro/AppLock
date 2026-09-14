@@ -36,8 +36,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Takes a front-camera photo or a short video for an intruder alert, with nothing shown on screen
- * but Android's camera dot.
+ * Takes a front-camera photo, a short video, or both for an intruder alert, with nothing shown on
+ * screen but Android's camera dot.
  *
  * Android only lets an app use the camera while it counts as in use. The accessibility service is
  * bound with the system's capabilities while the screen is on, which covers the lock overlay; the
@@ -49,12 +49,15 @@ import kotlin.coroutines.resumeWithException
 object IntruderCapture {
 
     sealed interface Result {
-        /** [note] says what was missing from a capture that still worked, such as the sound. */
-        data class Captured(val file: File, val note: String? = null) : Result
+        /** [notes] explain anything missing, such as the sound or one half of a pair. */
+        data class Captured(val files: List<File>, val notes: List<String> = emptyList()) : Result
         data class Failed(val reason: String) : Result
     }
 
-    private const val TIMEOUT_MS = 20_000L
+    private const val SINGLE_TIMEOUT_MS = 20_000L
+
+    // Two captures in a row, each opening the camera for itself.
+    private const val BOTH_TIMEOUT_MS = 35_000L
     private const val VIDEO_DURATION_MS = 5_000L
 
     // Without a preview nothing has run the camera yet, so give auto-exposure a moment to settle.
@@ -76,18 +79,25 @@ object IntruderCapture {
     fun hasMicrophonePermission(context: Context): Boolean =
         isGranted(context, Manifest.permission.RECORD_AUDIO)
 
-    fun extensionFor(mode: IntruderCaptureMode): String = when (mode) {
-        IntruderCaptureMode.PHOTO -> IntruderOutbox.PHOTO_EXTENSION
-        IntruderCaptureMode.VIDEO -> IntruderOutbox.VIDEO_EXTENSION
-    }
+    /** Whether [mode] records a video, and so has a use for the microphone. */
+    fun recordsVideo(mode: IntruderCaptureMode): Boolean = mode != IntruderCaptureMode.PHOTO
 
-    /** Writes a photo or video to [file], which is deleted again if nothing usable was captured. */
-    suspend fun capture(context: Context, mode: IntruderCaptureMode, file: File): Result {
+    /**
+     * Captures for [mode], asking [fileFor] where each file goes by its extension. Files that end
+     * up empty are deleted, so what comes back is only ever something worth emailing.
+     */
+    suspend fun capture(
+        context: Context,
+        mode: IntruderCaptureMode,
+        fileFor: (extension: String) -> File
+    ): Result {
         if (!hasCameraPermission(context)) return Result.Failed("camera permission not granted")
         val app = context.applicationContext
+        val timeout =
+            if (mode == IntruderCaptureMode.BOTH) BOTH_TIMEOUT_MS else SINGLE_TIMEOUT_MS
 
         return try {
-            withTimeout(TIMEOUT_MS) {
+            withTimeout(timeout) {
                 // CameraX binds and the lifecycle moves only on the main thread; nothing here blocks it.
                 withContext(Dispatchers.Main) {
                     val provider = cameraProvider(app)
@@ -95,8 +105,14 @@ object IntruderCapture {
                     owner.start()
                     try {
                         when (mode) {
-                            IntruderCaptureMode.PHOTO -> takePhoto(app, provider, owner, file)
-                            IntruderCaptureMode.VIDEO -> recordVideo(app, provider, owner, file)
+                            IntruderCaptureMode.PHOTO ->
+                                takePhoto(app, provider, owner, fileFor(IntruderOutbox.PHOTO_EXTENSION))
+
+                            IntruderCaptureMode.VIDEO ->
+                                recordVideo(app, provider, owner, fileFor(IntruderOutbox.VIDEO_EXTENSION))
+
+                            IntruderCaptureMode.BOTH ->
+                                captureBoth(app, provider, owner, fileFor)
                         }
                     } finally {
                         owner.destroy()
@@ -104,12 +120,58 @@ object IntruderCapture {
                 }
             }
         } catch (_: TimeoutCancellationException) {
-            file.delete()
             Result.Failed("the camera didn't respond in time")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            file.delete()
+            Result.Failed(e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    /**
+     * The photo first, so that if the camera is lost part way — the screen going off, another app
+     * taking it — the alert still carries something. Either half failing leaves the other one.
+     */
+    private suspend fun captureBoth(
+        context: Context,
+        provider: ProcessCameraProvider,
+        owner: LifecycleOwner,
+        fileFor: (extension: String) -> File
+    ): Result {
+        val photo = attempt {
+            takePhoto(context, provider, owner, fileFor(IntruderOutbox.PHOTO_EXTENSION))
+        }
+        val video = attempt {
+            recordVideo(context, provider, owner, fileFor(IntruderOutbox.VIDEO_EXTENSION))
+        }
+
+        val files = mutableListOf<File>()
+        val notes = mutableListOf<String>()
+        listOf("photo" to photo, "video" to video).forEach { (name, result) ->
+            when (result) {
+                is Result.Captured -> {
+                    files.addAll(result.files)
+                    notes.addAll(result.notes)
+                }
+
+                is Result.Failed -> notes.add("no $name: ${result.reason}")
+            }
+        }
+
+        return if (files.isEmpty()) {
+            Result.Failed(notes.joinToString("; ").ifEmpty { "nothing was captured" })
+        } else {
+            Result.Captured(files, notes)
+        }
+    }
+
+    /** Keeps one half of a [IntruderCaptureMode.BOTH] capture from taking the other down with it. */
+    private suspend fun attempt(block: suspend () -> Result): Result {
+        return try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             Result.Failed(e.message ?: e.javaClass.simpleName)
         }
     }
@@ -152,7 +214,12 @@ object IntruderCapture {
                     }
                 )
             }
-            return Result.Captured(file)
+
+            if (file.length() == 0L) {
+                file.delete()
+                return Result.Failed("the photo came out empty")
+            }
+            return Result.Captured(listOf(file))
         } finally {
             provider.unbind(imageCapture)
         }
@@ -195,14 +262,13 @@ object IntruderCapture {
                 return Result.Failed("recording failed with error ${finalize.error}$cause")
             }
 
-            val note = when {
-                finalize.error == VideoRecordEvent.Finalize.ERROR_SOURCE_INACTIVE ->
-                    "the recording stopped early, when the camera was closed"
-
-                !withSound -> "no sound: microphone permission not granted"
-                else -> null
+            val notes = buildList {
+                if (finalize.error == VideoRecordEvent.Finalize.ERROR_SOURCE_INACTIVE) {
+                    add("the recording stopped early, when the camera was closed")
+                }
+                if (!withSound) add("no sound: microphone permission not granted")
             }
-            return Result.Captured(file, note)
+            return Result.Captured(listOf(file), notes)
         } finally {
             // Stops a recording the timeout interrupted; does nothing once it has finished.
             recording?.close()

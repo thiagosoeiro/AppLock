@@ -362,6 +362,7 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="settings_screen_intruder_capture_title">Capture</string>
     <string name="settings_screen_intruder_capture_photo">Photo</string>
     <string name="settings_screen_intruder_capture_video">Video (with sound if allowed)</string>
+    <string name="settings_screen_intruder_capture_both">Photo and video</string>
     <string name="settings_screen_intruder_capture_dialog_title">What to capture</string>
     <string name="settings_screen_intruder_threshold_title">After wrong tries</string>
     <string name="settings_screen_intruder_threshold_desc">Send an alert once this many codes in a row are wrong (%1$d)</string>
