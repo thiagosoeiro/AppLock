@@ -108,6 +108,28 @@ class AppLockRepository(private val context: Context) {
     fun addTrustedWifiSsid(ssid: String) = preferencesRepository.addTrustedWifiSsid(ssid)
     fun removeTrustedWifiSsid(ssid: String) = preferencesRepository.removeTrustedWifiSsid(ssid)
 
+    fun setIntruderAlertsEnabled(enabled: Boolean) =
+        preferencesRepository.setIntruderAlertsEnabled(enabled)
+
+    fun isIntruderAlertsEnabled(): Boolean = preferencesRepository.isIntruderAlertsEnabled()
+    fun setIntruderCaptureMode(mode: IntruderCaptureMode) =
+        preferencesRepository.setIntruderCaptureMode(mode)
+
+    fun getIntruderCaptureMode(): IntruderCaptureMode = preferencesRepository.getIntruderCaptureMode()
+    fun setIntruderThreshold(tries: Int) = preferencesRepository.setIntruderThreshold(tries)
+    fun getIntruderThreshold(): Int = preferencesRepository.getIntruderThreshold()
+    fun setIntruderLocationEnabled(enabled: Boolean) =
+        preferencesRepository.setIntruderLocationEnabled(enabled)
+
+    fun isIntruderLocationEnabled(): Boolean = preferencesRepository.isIntruderLocationEnabled()
+    fun setIntruderEmail(apiKey: String?, from: String, to: String) =
+        preferencesRepository.setIntruderEmail(apiKey, from, to)
+
+    fun getIntruderApiKey(): String? = preferencesRepository.getIntruderApiKey()
+    fun getIntruderEmailFrom(): String = preferencesRepository.getIntruderEmailFrom()
+    fun getIntruderEmailTo(): String = preferencesRepository.getIntruderEmailTo()
+    fun isIntruderEmailConfigured(): Boolean = preferencesRepository.isIntruderEmailConfigured()
+
     fun setUnlockTimeDuration(minutes: Int) = preferencesRepository.setUnlockTimeDuration(minutes)
     fun getUnlockTimeDuration(): Int = preferencesRepository.getUnlockTimeDuration()
     fun setAutoUnlockEnabled(enabled: Boolean) = preferencesRepository.setAutoUnlockEnabled(enabled)
@@ -146,4 +168,10 @@ enum class BackendImplementation {
     ACCESSIBILITY,
     USAGE_STATS,
     SHIZUKU
+}
+
+/** What an intruder alert records with the front camera. */
+enum class IntruderCaptureMode {
+    PHOTO,
+    VIDEO
 }
