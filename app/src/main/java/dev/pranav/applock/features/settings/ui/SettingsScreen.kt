@@ -618,7 +618,7 @@ fun SettingsScreen(
 
             item {
                 SettingsGroup(
-                    items = listOf(
+                    items = listOfNotNull(
                         ActionSettingItem(
                             icon = Icons.Outlined.Security,
                             title = stringResource(R.string.settings_Screen_export_audit),
@@ -679,7 +679,11 @@ fun SettingsScreen(
                                 LogUtils.setLoggingEnabled(isChecked)
                             }
                         ),
-                        ActionSettingItem(
+                        // Troubleshooting only, so it comes and goes with the logging switch above.
+                        // Worth having at all because the lock it checks is otherwise silent: it
+                        // runs only while the accessibility service is going away, so nothing else
+                        // would show that it had stopped working.
+                        if (loggingEnabled) ActionSettingItem(
                             icon = Icons.Default.Lock,
                             title = stringResource(R.string.settings_screen_test_lock_title),
                             subtitle = stringResource(R.string.settings_screen_test_lock_desc),
@@ -692,7 +696,7 @@ fun SettingsScreen(
                                     ).show()
                                 }
                             }
-                        )
+                        ) else null
                     )
                 )
             }

@@ -186,9 +186,9 @@ the app uninstalled on the phone, because the screen locked too late. PR #13, on
   either-order match, and the device admin page locked twice.
 - **Device admin locking is proven** (2026-09-14). Every lock until then had gone through the
   accessibility service, so the device admin path had never been seen working — and it is the only
-  path left once the accessibility service is going away. Settings → Advanced → **Test screen lock**
-  calls that path on its own, and the log answered: "Locked the phone through device admin: test
-  from settings". Still unverified: that `onUnbind` fires when the service is switched off (the
+  path left once the accessibility service is going away. Settings → Advanced → **Test screen lock**,
+  which appears while Logging is on, calls that path on its own, and the log answered: "Locked the
+  phone through device admin: test from settings". Still unverified: that `onUnbind` fires when the service is switched off (the
   volume-key accessibility shortcut would show it, since it never opens the guarded page),
   reinstalling over the app, and the Deactivate-tap and admin-removed locks.
 - **Known gap, left as is.** After a guard locks, repeat matches are ignored for 2 s, so that
