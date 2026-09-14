@@ -27,6 +27,12 @@
         android:name="android.hardware.microphone"
         android:required="false" />
 
+    <!-- Remote lock: incoming SMS are checked for the keyword. Nothing is stored or sent. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
     <!-- Trusted Wi-Fi: Android only shares the connected network's name with location access. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -191,6 +197,20 @@
                 <action android:name="dev.pranav.applock.action.ENABLE_PROTECTION" />
                 <action android:name="dev.pranav.applock.action.DISABLE_PROTECTION" />
                 <action android:name="dev.pranav.applock.action.QUERY_PROTECTION_STATE" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Remote lock by SMS. Disabled until remote lock is turned on in Settings, and only the
+            phone's SMS system can reach it, since sending SMS_RECEIVED needs BROADCAST_SMS.
+        -->
+        <receiver
+            android:name=".core.remotelock.RemoteLockSmsReceiver"
+            android:enabled="false"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
 
