@@ -27,7 +27,7 @@ class RemoteLockListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        // A message that came in while Android had this unbound still counts, if it's recent.
+        // A message that came in while Android had this unbound still counts.
         try {
             activeNotifications?.forEach(::checkNotification)
         } catch (e: Exception) {

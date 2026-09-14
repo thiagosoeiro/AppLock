@@ -330,17 +330,30 @@ class PreferencesRepository(context: Context) {
         return getIntruderEmailTo().isNotBlank() && !getIntruderApiKey().isNullOrBlank()
     }
 
+    /**
+     * Turning remote lock on also counts every message sent until now as seen, so a keyword already
+     * in a chat - a test, or one sent while it was off - can't act later.
+     */
     fun setRemoteLockEnabled(enabled: Boolean) {
         settingsPrefs.edit(commit = true) { putBoolean(KEY_REMOTE_LOCK_ENABLED, enabled) }
+        if (enabled) markRemoteLockMessagesSeen()
     }
 
     fun isRemoteLockEnabled(): Boolean {
         return settingsPrefs.getBoolean(KEY_REMOTE_LOCK_ENABLED, false)
     }
 
-    /** Stored as typed; matching ignores case, spacing and punctuation at either end. */
+    /**
+     * Stored as typed; matching ignores case, spacing and punctuation at either end. A message sent
+     * before the keyword was saved can't act either.
+     */
     fun setRemoteLockKeyword(keyword: String) {
         appLockPrefs.edit(commit = true) { putString(KEY_REMOTE_LOCK_KEYWORD, keyword.trim()) }
+        markRemoteLockMessagesSeen()
+    }
+
+    private fun markRemoteLockMessagesSeen() {
+        setRemoteLockLastMessageAt(maxOf(getRemoteLockLastMessageAt(), System.currentTimeMillis()))
     }
 
     fun getRemoteLockKeyword(): String? {

@@ -35,9 +35,6 @@ object RemoteLock {
     /** The shortest keyword accepted, counted after [normalize]. */
     const val MIN_KEYWORD_LENGTH = 8
 
-    // Anything older is history, such as a chat notification that still lists the message.
-    private const val MAX_MESSAGE_AGE_MS = 15 * 60 * 1000L
-
     // How far another app's message time may run ahead of this phone's clock.
     private const val MAX_CLOCK_AHEAD_MS = 60 * 1000L
 
@@ -107,9 +104,13 @@ object RemoteLock {
 
     /**
      * Acts on a message that matched the keyword. [sentAt] is when it was sent, as far as its channel
-     * can tell. Returns null when it was ignored: switched off, too old, a message already seen, or a
-     * remote lock ran moments ago. Otherwise returns the job emailing the confirmation, which ends at
-     * once when no email is due. Never throws, so a channel can call it from Android's callback.
+     * can tell. Returns null when it was ignored: switched off, sent before remote lock was turned on
+     * or the keyword saved, a message already seen, or a remote lock ran moments ago. Otherwise
+     * returns the job emailing the confirmation, which ends at once when no email is due. Never
+     * throws, so a channel can call it from Android's callback.
+     *
+     * There is no age limit: a message held up by airplane mode or a switched-off phone still acts
+     * when it finally arrives, and turning remote lock on already rules out older ones.
      */
     fun onKeywordMessage(context: Context, sentAt: Long, source: Source): Job? {
         val appContext = context.applicationContext
@@ -140,12 +141,15 @@ object RemoteLock {
         val from = describeForLog(source)
         val now = System.currentTimeMillis()
         return synchronized(lock) {
-            if (sentAt < now - MAX_MESSAGE_AGE_MS || sentAt > now + MAX_CLOCK_AHEAD_MS) {
-                LogUtils.d(TAG, "Keyword by $from ignored: not sent within the last 15 minutes")
+            if (sentAt > now + MAX_CLOCK_AHEAD_MS) {
+                LogUtils.d(TAG, "Keyword by $from ignored: dated ahead of this phone's clock")
                 return false
             }
             if (sentAt <= repository.getRemoteLockLastMessageAt()) {
-                LogUtils.d(TAG, "Keyword by $from ignored: that message was already seen")
+                LogUtils.d(
+                    TAG,
+                    "Keyword by $from ignored: sent before remote lock was set up, or already seen"
+                )
                 return false
             }
             repository.setRemoteLockLastMessageAt(sentAt)
