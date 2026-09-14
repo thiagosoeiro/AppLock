@@ -174,6 +174,15 @@ the app uninstalled on the phone, because the screen locked too late. PR #13, on
   - clearing unlock state does nothing, and logs nothing, when nothing is unlocked;
   - Settings pages showing our name log their view IDs, to find a way to recognise App info on
     One UI.
+- **Second phone test** (2026-09-14, same phone): the Accessibility page locked once, a locked app
+  opened one lock screen, the apps list didn't lock, and "Cleared all unlock states" fell from 711
+  lines to 4. App info still only bounced after the version scrolled in, but the view-ID log showed
+  its header (`entity_header_title`) and `uninstall_button`, which the apps list lacks.
+- **Changed after the second test**, one commit: App info is recognised by our name in that header
+  next to an Uninstall button, as well as by name-plus-version, so it bounces on One UI without a
+  scroll. Not yet retested. Still unverified on a phone: the uninstall dialog from the home screen,
+  reinstalling over the app, the Deactivate-tap and admin-removed locks, and the accessibility-off
+  lock through device admin.
 
 ## Testing chunks 2 and 3
 

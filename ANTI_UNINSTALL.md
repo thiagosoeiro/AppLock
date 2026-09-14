@@ -90,9 +90,9 @@ can't get past it.
   title a page differently and slip past. If a page isn't caught on your phone, enable
   **Settings → Advanced → Logging**, reproduce it, and export the security log — the class name and
   on-screen text in there are what the check needs.
-- **The disguise name is generic.** The App info bounce fires when "System Services" appears on a
-  Settings page as it opens. If some unrelated page happens to contain that text, it could bounce
-  you off it too.
+- **The disguise name is generic.** The App info bounce fires when it finds "System Services" on the
+  App info page — with the app's version, or in the page header next to an Uninstall button. If some
+  unrelated page happens to look like that, it could bounce you off it too.
 - **Bounces can still lose to a very fast tap.** Each page is checked as it opens and for about a
   second while it finishes drawing. The locks above cover a tap that gets through first.
 - **The uninstall dialog check depends on the installer's screen names.** It only fires when the
