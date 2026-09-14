@@ -132,6 +132,7 @@ fun SettingsScreen(
     var intruderThreshold by remember { mutableIntStateOf(appLockRepository.getIntruderThreshold()) }
     var intruderLocation by remember { mutableStateOf(appLockRepository.isIntruderLocationEnabled()) }
     var intruderEmailConfigured by remember { mutableStateOf(appLockRepository.isIntruderEmailConfigured()) }
+    var intruderSendError by remember { mutableStateOf(appLockRepository.getIntruderSendError()) }
     var showIntruderEmailDialog by remember { mutableStateOf(false) }
     var showIntruderCaptureDialog by remember { mutableStateOf(false) }
     var showIntruderThresholdDialog by remember { mutableStateOf(false) }
@@ -166,6 +167,8 @@ fun SettingsScreen(
                         TrustedNetworkMonitor.hasBackgroundLocationPermission(context)
                 locationEnabled = TrustedNetworkMonitor.isLocationEnabled(context)
                 if (trustedWifiEnabled) TrustedNetworkMonitor.refresh(context)
+                // An alert can fail while this screen is away, so pick the reason up on return.
+                intruderSendError = appLockRepository.getIntruderSendError()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -289,6 +292,7 @@ fun SettingsScreen(
             onSave = { apiKey, from, to ->
                 appLockRepository.setIntruderEmail(apiKey, from, to)
                 intruderEmailConfigured = appLockRepository.isIntruderEmailConfigured()
+                intruderSendError = appLockRepository.getIntruderSendError()
                 showIntruderEmailDialog = false
                 // Alerts captured before the email worked are still waiting: give them another try
                 // now rather than leaving them until the next alert.
@@ -692,13 +696,21 @@ fun SettingsScreen(
                         ActionSettingItem(
                             icon = Icons.Default.Email,
                             title = stringResource(R.string.settings_screen_intruder_email_title),
-                            subtitle = if (intruderEmailConfigured)
-                                stringResource(
+                            // A refusal Resend gives back, such as a recipient that needs a verified
+                            // domain, would otherwise only show up in the test alert.
+                            subtitle = when {
+                                intruderSendError != null -> stringResource(
+                                    R.string.settings_screen_intruder_email_desc_error,
+                                    intruderSendError.orEmpty()
+                                )
+
+                                intruderEmailConfigured -> stringResource(
                                     R.string.settings_screen_intruder_email_desc_set,
                                     appLockRepository.getIntruderEmailTo()
                                 )
-                            else
-                                stringResource(R.string.settings_screen_intruder_email_desc_unset),
+
+                                else -> stringResource(R.string.settings_screen_intruder_email_desc_unset)
+                            },
                             onClick = { showIntruderEmailDialog = true }
                         ),
                         if (intruderEmailConfigured) ActionSettingItem(
@@ -713,6 +725,7 @@ fun SettingsScreen(
                                 ).show()
                                 coroutineScope.launch {
                                     val message = IntruderAlerts.sendTest(context)
+                                    intruderSendError = appLockRepository.getIntruderSendError()
                                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                 }
                             }

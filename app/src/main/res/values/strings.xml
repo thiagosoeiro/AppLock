@@ -374,6 +374,7 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="settings_screen_intruder_email_title">Email (Resend)</string>
     <string name="settings_screen_intruder_email_desc_set">Sending to %1$s</string>
     <string name="settings_screen_intruder_email_desc_unset">Add your Resend API key and where to send alerts</string>
+    <string name="settings_screen_intruder_email_desc_error">Last alert wasn\'t sent: %1$s</string>
     <string name="settings_screen_intruder_email_dialog_title">Email through Resend</string>
     <string name="settings_screen_intruder_email_dialog_intro">Alerts are sent with your Resend account. Create a sending-only API key at resend.com and paste it here. Without a verified domain, keep the sender as onboarding@resend.dev and send only to your own Resend account address.</string>
     <string name="settings_screen_intruder_email_api_key">Resend API key</string>
