@@ -129,6 +129,8 @@ class AppLockRepository(private val context: Context) {
     fun getIntruderEmailFrom(): String = preferencesRepository.getIntruderEmailFrom()
     fun getIntruderEmailTo(): String = preferencesRepository.getIntruderEmailTo()
     fun isIntruderEmailConfigured(): Boolean = preferencesRepository.isIntruderEmailConfigured()
+    fun setIntruderSendError(error: String?) = preferencesRepository.setIntruderSendError(error)
+    fun getIntruderSendError(): String? = preferencesRepository.getIntruderSendError()
 
     fun setUnlockTimeDuration(minutes: Int) = preferencesRepository.setUnlockTimeDuration(minutes)
     fun getUnlockTimeDuration(): Int = preferencesRepository.getUnlockTimeDuration()

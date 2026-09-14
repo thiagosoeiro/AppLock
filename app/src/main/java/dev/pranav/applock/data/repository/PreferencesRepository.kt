@@ -294,7 +294,20 @@ class PreferencesRepository(context: Context) {
         settingsPrefs.edit(commit = true) {
             putString(KEY_INTRUDER_EMAIL_FROM, from.trim())
             putString(KEY_INTRUDER_EMAIL_TO, to.trim())
+            // The next send says whether the new settings work.
+            remove(KEY_INTRUDER_SEND_ERROR)
         }
+    }
+
+    /** Why the last alert couldn't be emailed, or null once one has gone through. */
+    fun setIntruderSendError(error: String?) {
+        settingsPrefs.edit {
+            if (error == null) remove(KEY_INTRUDER_SEND_ERROR) else putString(KEY_INTRUDER_SEND_ERROR, error)
+        }
+    }
+
+    fun getIntruderSendError(): String? {
+        return settingsPrefs.getString(KEY_INTRUDER_SEND_ERROR, null)
     }
 
     /** The Resend API key, or null if none is stored or it can't be decrypted on this install. */
@@ -403,6 +416,7 @@ class PreferencesRepository(context: Context) {
         private const val KEY_INTRUDER_API_KEY = "intruder_resend_api_key"
         private const val KEY_INTRUDER_EMAIL_FROM = "intruder_email_from"
         private const val KEY_INTRUDER_EMAIL_TO = "intruder_email_to"
+        private const val KEY_INTRUDER_SEND_ERROR = "intruder_send_error"
 
         private const val DEFAULT_PROTECT_ENABLED = true
         private const val DEFAULT_AUTOMATION_ENABLED = false
