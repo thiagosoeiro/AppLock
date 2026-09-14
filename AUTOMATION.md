@@ -38,7 +38,8 @@ manifest-declared receivers, so a broadcast with only an action set will silentl
 
 ## Reading the state back
 
-Whenever protection changes — by intent or by the shield toggle in the app — AppLock broadcasts:
+Whenever protection changes — by intent, by the shield toggle in the app, or by a
+[remote lock](REMOTE_LOCK.md) message — AppLock broadcasts:
 
 ```
 dev.pranav.applock.action.PROTECTION_STATE   boolean extra "state"

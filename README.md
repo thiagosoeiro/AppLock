@@ -69,10 +69,11 @@ root required.
 - Anti-uninstall protection ([how it behaves, and the "System Services" disguise](ANTI_UNINSTALL.md))
 - Anti-uninstall protection for user apps
 - Intruder alerts: a front-camera photo or video emailed after wrong tries ([setup and details](INTRUDER_ALERTS.md))
+- Remote lock: a keyword sent by SMS or chat locks the apps and the phone ([setup and details](REMOTE_LOCK.md))
 - Unlock timeout for convenience
 - No root required
 - One-tap app locking
-- All data stays on your device, except intruder alerts you turn on, which are emailed through your own Resend account
+- All data stays on your device, except intruder alerts and remote lock reports you turn on, which are emailed through your own Resend account
 - Real-time background protection
 - Lightweight and fast
 

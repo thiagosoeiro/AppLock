@@ -22,7 +22,7 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 11 | [Lock new apps automatically](#11-lock-new-apps-automatically) | Small to medium | Not started |
 | 12 | [Re-lock everything from Quick Settings](#12-re-lock-everything-from-quick-settings) | Small | Not started |
 | 13 | [Send the log off the phone](#13-send-the-log-off-the-phone) | Medium | Built (email), see [INTRUDER_ALERTS.md](INTRUDER_ALERTS.md) |
-| 14 | [Lock remotely by message](#14-lock-remotely-by-message) | Medium | Not started |
+| 14 | [Lock remotely by message](#14-lock-remotely-by-message) | Medium | Built, see [REMOTE_LOCK.md](REMOTE_LOCK.md) |
 | 15 | [Spoken warning or alarm](#15-spoken-warning-or-alarm) | Small | Not started |
 | 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Not started |
 | 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Not started |
@@ -114,6 +114,11 @@ theft.
   [SECURITY_AUDIT.md](SECURITY_AUDIT.md)).
 
 ### 14. Lock remotely by message
+
+**Built — see [REMOTE_LOCK.md](REMOTE_LOCK.md).** Both routes were built: SMS, and notification
+access, the only one that sees RCS and chat apps. A match switches protection on, re-locks every
+app, locks the phone if that switch is on, and emails a short report through the intruder alert
+email. Trusted Wi-Fi still applies afterwards, and there is no remote unlock.
 
 Send a secret keyword from another phone, by SMS or a messaging app, to switch protection on,
 re-lock every app and optionally lock the phone. Useful when the phone is lost, or lent to someone.
