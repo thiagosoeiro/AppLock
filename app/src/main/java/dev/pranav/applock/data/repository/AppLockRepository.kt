@@ -132,6 +132,31 @@ class AppLockRepository(private val context: Context) {
     fun setIntruderSendError(error: String?) = preferencesRepository.setIntruderSendError(error)
     fun getIntruderSendError(): String? = preferencesRepository.getIntruderSendError()
 
+    fun setRemoteLockEnabled(enabled: Boolean) = preferencesRepository.setRemoteLockEnabled(enabled)
+    fun isRemoteLockEnabled(): Boolean = preferencesRepository.isRemoteLockEnabled()
+    fun setRemoteLockKeyword(keyword: String) = preferencesRepository.setRemoteLockKeyword(keyword)
+    fun getRemoteLockKeyword(): String? = preferencesRepository.getRemoteLockKeyword()
+    fun setRemoteLockPhoneEnabled(enabled: Boolean) =
+        preferencesRepository.setRemoteLockPhoneEnabled(enabled)
+
+    fun isRemoteLockPhoneEnabled(): Boolean = preferencesRepository.isRemoteLockPhoneEnabled()
+    fun setRemoteLockEmailEnabled(enabled: Boolean) =
+        preferencesRepository.setRemoteLockEmailEnabled(enabled)
+
+    fun isRemoteLockEmailEnabled(): Boolean = preferencesRepository.isRemoteLockEmailEnabled()
+    fun setRemoteLockLastMessageAt(sentAt: Long) =
+        preferencesRepository.setRemoteLockLastMessageAt(sentAt)
+
+    fun getRemoteLockLastMessageAt(): Long = preferencesRepository.getRemoteLockLastMessageAt()
+    fun setRemoteLockLastLockAt(lockedAt: Long) =
+        preferencesRepository.setRemoteLockLastLockAt(lockedAt)
+
+    fun getRemoteLockLastLockAt(): Long = preferencesRepository.getRemoteLockLastLockAt()
+    fun setRemoteLockLastEmailAt(queuedAt: Long) =
+        preferencesRepository.setRemoteLockLastEmailAt(queuedAt)
+
+    fun getRemoteLockLastEmailAt(): Long = preferencesRepository.getRemoteLockLastEmailAt()
+
     fun setUnlockTimeDuration(minutes: Int) = preferencesRepository.setUnlockTimeDuration(minutes)
     fun getUnlockTimeDuration(): Int = preferencesRepository.getUnlockTimeDuration()
     fun setAutoUnlockEnabled(enabled: Boolean) = preferencesRepository.setAutoUnlockEnabled(enabled)
