@@ -133,6 +133,20 @@
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
+        <!--
+            Remote lock: looks for the keyword in other apps' notifications. Android binds it only
+            while notification access is allowed; nothing it reads is stored or sent.
+        -->
+        <service
+            android:name=".core.remotelock.RemoteLockListener"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".core.broadcast.DeviceAdmin"
             android:description="@string/device_admin_description"
