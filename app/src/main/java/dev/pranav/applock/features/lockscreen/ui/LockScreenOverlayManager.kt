@@ -27,6 +27,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.data.repository.PreferencesRepository
+import dev.pranav.applock.services.AppLockManager
 import dev.pranav.applock.ui.theme.AppLockTheme
 
 @SuppressLint("ViewConstructor")
@@ -57,6 +58,9 @@ class LockScreenOverlayManager(private val context: Context):
         onExit: () -> Unit
     ) {
         if (composeView != null) return
+
+        // For an intruder alert: which app the wrong code was entered against.
+        AppLockManager.appOnLockScreen = lockedPackageName
 
         if (!isStateRestored) {
             savedStateRegistryController.performRestore(null)
@@ -238,5 +242,8 @@ class LockScreenOverlayManager(private val context: Context):
             }
             composeView = null
         }
+        // Outside the block above: the overlay can be gone already, and a stale package name here
+        // would put the wrong app in the next alert.
+        AppLockManager.appOnLockScreen = null
     }
 }

@@ -3,6 +3,7 @@ package dev.pranav.applock.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import dev.pranav.applock.core.intruder.IntruderAlerts
 import dev.pranav.applock.core.utils.SecurityUtils
 
 /**
@@ -20,6 +21,8 @@ class PreferencesRepository(context: Context) {
     private val attemptLimiter = UnlockAttemptLimiter(context)
 
     private val credentialHasher = CredentialHasher(context)
+
+    private val secretCipher = SecretCipher()
 
     fun setPassword(password: String) {
         appLockPrefs.edit(commit = true) {
@@ -138,7 +141,8 @@ class PreferencesRepository(context: Context) {
         if (isValid) {
             attemptLimiter.recordSuccess()
         } else if (input.length >= MIN_CREDENTIAL_LENGTH) {
-            attemptLimiter.recordFailure()
+            val failures = attemptLimiter.recordFailure()
+            IntruderAlerts.onWrongTry(failures)
         }
         return isValid
     }
@@ -243,6 +247,89 @@ class PreferencesRepository(context: Context) {
         settingsPrefs.edit(commit = true) { putStringSet(KEY_TRUSTED_WIFI_SSIDS, updated) }
     }
 
+    fun setIntruderAlertsEnabled(enabled: Boolean) {
+        settingsPrefs.edit(commit = true) { putBoolean(KEY_INTRUDER_ALERTS_ENABLED, enabled) }
+    }
+
+    fun isIntruderAlertsEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_INTRUDER_ALERTS_ENABLED, false)
+    }
+
+    fun setIntruderCaptureMode(mode: IntruderCaptureMode) {
+        settingsPrefs.edit { putString(KEY_INTRUDER_CAPTURE_MODE, mode.name) }
+    }
+
+    fun getIntruderCaptureMode(): IntruderCaptureMode {
+        val mode = settingsPrefs.getString(KEY_INTRUDER_CAPTURE_MODE, null)
+        return IntruderCaptureMode.entries.firstOrNull { it.name == mode } ?: IntruderCaptureMode.PHOTO
+    }
+
+    /** How many wrong tries in a row send an alert, and again at each multiple of it. */
+    fun setIntruderThreshold(tries: Int) {
+        settingsPrefs.edit {
+            putInt(KEY_INTRUDER_THRESHOLD, tries.coerceIn(MIN_INTRUDER_THRESHOLD, MAX_INTRUDER_THRESHOLD))
+        }
+    }
+
+    fun getIntruderThreshold(): Int {
+        return settingsPrefs.getInt(KEY_INTRUDER_THRESHOLD, DEFAULT_INTRUDER_THRESHOLD)
+            .coerceIn(MIN_INTRUDER_THRESHOLD, MAX_INTRUDER_THRESHOLD)
+    }
+
+    fun setIntruderLocationEnabled(enabled: Boolean) {
+        settingsPrefs.edit { putBoolean(KEY_INTRUDER_LOCATION, enabled) }
+    }
+
+    fun isIntruderLocationEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_INTRUDER_LOCATION, false)
+    }
+
+    /**
+     * Saves where alerts are emailed. A null [apiKey] keeps the stored key, since the screen never
+     * shows it back. Throws if the Keystore can't encrypt a new key, so it is never stored in the clear.
+     */
+    fun setIntruderEmail(apiKey: String?, from: String, to: String) {
+        val sealedKey = apiKey?.trim()?.takeIf { it.isNotEmpty() }?.let(secretCipher::encrypt)
+        if (sealedKey != null) {
+            appLockPrefs.edit(commit = true) { putString(KEY_INTRUDER_API_KEY, sealedKey) }
+        }
+        settingsPrefs.edit(commit = true) {
+            putString(KEY_INTRUDER_EMAIL_FROM, from.trim())
+            putString(KEY_INTRUDER_EMAIL_TO, to.trim())
+            // The next send says whether the new settings work.
+            remove(KEY_INTRUDER_SEND_ERROR)
+        }
+    }
+
+    /** Why the last alert couldn't be emailed, or null once one has gone through. */
+    fun setIntruderSendError(error: String?) {
+        settingsPrefs.edit {
+            if (error == null) remove(KEY_INTRUDER_SEND_ERROR) else putString(KEY_INTRUDER_SEND_ERROR, error)
+        }
+    }
+
+    fun getIntruderSendError(): String? {
+        return settingsPrefs.getString(KEY_INTRUDER_SEND_ERROR, null)
+    }
+
+    /** The Resend API key, or null if none is stored or it can't be decrypted on this install. */
+    fun getIntruderApiKey(): String? {
+        return appLockPrefs.getString(KEY_INTRUDER_API_KEY, null)?.let(secretCipher::decrypt)
+    }
+
+    fun getIntruderEmailFrom(): String {
+        return settingsPrefs.getString(KEY_INTRUDER_EMAIL_FROM, null)?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_INTRUDER_EMAIL_FROM
+    }
+
+    fun getIntruderEmailTo(): String {
+        return settingsPrefs.getString(KEY_INTRUDER_EMAIL_TO, null).orEmpty()
+    }
+
+    fun isIntruderEmailConfigured(): Boolean {
+        return getIntruderEmailTo().isNotBlank() && !getIntruderApiKey().isNullOrBlank()
+    }
+
     fun setUnlockTimeDuration(minutes: Int) {
         settingsPrefs.edit { putInt(KEY_UNLOCK_TIME_DURATION, minutes) }
     }
@@ -324,11 +411,27 @@ class PreferencesRepository(context: Context) {
         private const val KEY_PIN_LENGTH = "pin_length"
         private const val KEY_TRUSTED_WIFI_ENABLED = "trusted_wifi_enabled"
         private const val KEY_TRUSTED_WIFI_SSIDS = "trusted_wifi_ssids"
+        private const val KEY_INTRUDER_ALERTS_ENABLED = "intruder_alerts_enabled"
+        private const val KEY_INTRUDER_CAPTURE_MODE = "intruder_capture_mode"
+        private const val KEY_INTRUDER_THRESHOLD = "intruder_threshold"
+        private const val KEY_INTRUDER_LOCATION = "intruder_include_location"
+        private const val KEY_INTRUDER_API_KEY = "intruder_resend_api_key"
+        private const val KEY_INTRUDER_EMAIL_FROM = "intruder_email_from"
+        private const val KEY_INTRUDER_EMAIL_TO = "intruder_email_to"
+        private const val KEY_INTRUDER_SEND_ERROR = "intruder_send_error"
 
         private const val DEFAULT_PROTECT_ENABLED = true
         private const val DEFAULT_AUTOMATION_ENABLED = false
         private const val DEFAULT_TRUSTED_WIFI_ENABLED = false
         private const val DEFAULT_UNLOCK_DURATION = 0
+        private const val DEFAULT_INTRUDER_THRESHOLD = 3
+
+        /** Resend's shared sender, usable without a verified domain but only to the account's address. */
+        const val DEFAULT_INTRUDER_EMAIL_FROM = "onboarding@resend.dev"
+
+        /** Up to 4 wrong tries cost nothing, so a threshold in this range alerts before the first wait. */
+        const val MIN_INTRUDER_THRESHOLD = 2
+        const val MAX_INTRUDER_THRESHOLD = 5
 
         /** The shortest PIN, pattern or password the set screens accept. */
         private const val MIN_CREDENTIAL_LENGTH = 4

@@ -16,12 +16,12 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 5 | [Fake crash on locked apps](#5-fake-crash-on-locked-apps) | Medium | Not started |
 | 6 | [Duress PIN](#6-duress-pin) | Medium to large | Not started |
 | 7 | [Hide notification content for locked apps](#7-hide-notification-content-for-locked-apps) | Medium to large | Not started |
-| 8 | [Intruder photo or video](#8-intruder-photo-or-video) | Medium to large | Not started |
+| 8 | [Intruder photo or video](#8-intruder-photo-or-video) | Medium to large | Built, see [INTRUDER_ALERTS.md](INTRUDER_ALERTS.md) |
 | 9 | [Unlock report and log viewer](#9-unlock-report-and-log-viewer) | Small to medium | Not started |
 | 10 | [Timeout per app](#10-timeout-per-app) | Medium | Not started |
 | 11 | [Lock new apps automatically](#11-lock-new-apps-automatically) | Small to medium | Not started |
 | 12 | [Re-lock everything from Quick Settings](#12-re-lock-everything-from-quick-settings) | Small | Not started |
-| 13 | [Send the log off the phone](#13-send-the-log-off-the-phone) | Medium | Not started |
+| 13 | [Send the log off the phone](#13-send-the-log-off-the-phone) | Medium | Built (email), see [INTRUDER_ALERTS.md](INTRUDER_ALERTS.md) |
 | 14 | [Lock remotely by message](#14-lock-remotely-by-message) | Medium | Not started |
 | 15 | [Spoken warning or alarm](#15-spoken-warning-or-alarm) | Small | Not started |
 | 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Not started |
@@ -98,6 +98,10 @@ locking the phone, that could provoke the person forcing it.
 
 ### 13. Send the log off the phone
 
+**Built as email, together with item 8 — see [INTRUDER_ALERTS.md](INTRUDER_ALERTS.md).** The chosen
+route was email through Resend, which adds the internet permission; the SMS and automation-app routes
+below were not taken. The README's "all data stays on the device" line now names this exception.
+
 After wrong tries, send the log entry, and the photo or video from item 8, somewhere off the phone.
 Anything kept only on the phone leaves with the thief, so this is what makes item 8 useful against
 theft.
@@ -138,6 +142,10 @@ take over accounts.
   notification has to follow the disguise.
 
 ### 8. Intruder photo or video
+
+**Built — see [INTRUDER_ALERTS.md](INTRUDER_ALERTS.md).** It captures a front-camera photo or a short
+video after a run of wrong tries and emails it with item 13, rather than keeping it on the phone: a
+capture left on the phone leaves with a thief. There is no on-device gallery.
 
 [Upstream #229](https://github.com/aload0/AppLock/issues/229). After a chosen number of wrong
 tries, for example 3, take a front-camera photo or record a short video, and show it with the

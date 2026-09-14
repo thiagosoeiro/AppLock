@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BugReport
@@ -39,6 +41,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -47,6 +51,10 @@ import androidx.navigation.NavController
 import dev.pranav.applock.R
 import dev.pranav.applock.core.broadcast.AutomationReceiver
 import dev.pranav.applock.core.broadcast.DeviceAdmin
+import dev.pranav.applock.core.intruder.IntruderAlerts
+import dev.pranav.applock.core.intruder.IntruderCapture
+import dev.pranav.applock.core.intruder.IntruderLocation
+import dev.pranav.applock.core.intruder.IntruderSendJob
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
@@ -57,10 +65,13 @@ import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
 import dev.pranav.applock.core.utils.openAccessibilitySettings
 import dev.pranav.applock.data.repository.AppLockRepository
 import dev.pranav.applock.data.repository.BackendImplementation
+import dev.pranav.applock.data.repository.IntruderCaptureMode
+import dev.pranav.applock.data.repository.PreferencesRepository
 import dev.pranav.applock.features.admin.AdminDisableActivity
 import dev.pranav.applock.services.ShizukuAppLockService
 import dev.pranav.applock.services.UsageLockService
 import dev.pranav.applock.ui.icons.*
+import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
 import kotlin.math.abs
@@ -116,6 +127,18 @@ fun SettingsScreen(
     }
     var locationEnabled by remember { mutableStateOf(TrustedNetworkMonitor.isLocationEnabled(context)) }
 
+    var intruderAlertsEnabled by remember { mutableStateOf(appLockRepository.isIntruderAlertsEnabled()) }
+    var intruderCaptureMode by remember { mutableStateOf(appLockRepository.getIntruderCaptureMode()) }
+    var intruderThreshold by remember { mutableIntStateOf(appLockRepository.getIntruderThreshold()) }
+    var intruderLocation by remember { mutableStateOf(appLockRepository.isIntruderLocationEnabled()) }
+    var intruderEmailConfigured by remember { mutableStateOf(appLockRepository.isIntruderEmailConfigured()) }
+    var intruderSendError by remember { mutableStateOf(appLockRepository.getIntruderSendError()) }
+    var showIntruderEmailDialog by remember { mutableStateOf(false) }
+    var showIntruderCaptureDialog by remember { mutableStateOf(false) }
+    var showIntruderThresholdDialog by remember { mutableStateOf(false) }
+    var pendingEnableIntruder by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
     var showPermissionDialog by remember { mutableStateOf(false) }
     var showDeviceAdminDialog by remember { mutableStateOf(false) }
     var showAccessibilityDialog by remember { mutableStateOf(false) }
@@ -144,6 +167,8 @@ fun SettingsScreen(
                         TrustedNetworkMonitor.hasBackgroundLocationPermission(context)
                 locationEnabled = TrustedNetworkMonitor.isLocationEnabled(context)
                 if (trustedWifiEnabled) TrustedNetworkMonitor.refresh(context)
+                // An alert can fail while this screen is away, so pick the reason up on return.
+                intruderSendError = appLockRepository.getIntruderSendError()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -193,6 +218,125 @@ fun SettingsScreen(
 
             else -> backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
+    }
+
+    val intruderLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        if (IntruderLocation.hasPermission(context)) {
+            intruderLocation = true
+            appLockRepository.setIntruderLocationEnabled(true)
+        } else {
+            Toast.makeText(
+                context,
+                context.getString(R.string.settings_screen_intruder_location_denied),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    val intruderPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        if (IntruderCapture.hasCameraPermission(context)) {
+            appLockRepository.setIntruderAlertsEnabled(true)
+            intruderAlertsEnabled = true
+            if (IntruderCapture.recordsVideo(intruderCaptureMode) &&
+                !IntruderCapture.hasMicrophonePermission(context)
+            ) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.settings_screen_intruder_enabled_no_sound),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } else {
+            Toast.makeText(
+                context,
+                context.getString(R.string.settings_screen_intruder_camera_needed),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    // Enables intruder alerts once the email is set up and the camera is granted, asking for
+    // whichever is still missing. The email dialog and the permission result call it again.
+    fun tryEnableIntruderAlerts() {
+        when {
+            !appLockRepository.isIntruderEmailConfigured() -> {
+                pendingEnableIntruder = true
+                showIntruderEmailDialog = true
+            }
+
+            !IntruderCapture.hasCameraPermission(context) -> {
+                val permissions = if (IntruderCapture.recordsVideo(intruderCaptureMode)) {
+                    arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+                } else {
+                    arrayOf(Manifest.permission.CAMERA)
+                }
+                intruderPermissionLauncher.launch(permissions)
+            }
+
+            else -> {
+                appLockRepository.setIntruderAlertsEnabled(true)
+                intruderAlertsEnabled = true
+            }
+        }
+    }
+
+    if (showIntruderEmailDialog) {
+        IntruderEmailDialog(
+            hasStoredKey = !appLockRepository.getIntruderApiKey().isNullOrBlank(),
+            from = appLockRepository.getIntruderEmailFrom(),
+            to = appLockRepository.getIntruderEmailTo(),
+            onSave = { apiKey, from, to ->
+                appLockRepository.setIntruderEmail(apiKey, from, to)
+                intruderEmailConfigured = appLockRepository.isIntruderEmailConfigured()
+                intruderSendError = appLockRepository.getIntruderSendError()
+                showIntruderEmailDialog = false
+                // Alerts captured before the email worked are still waiting: give them another try
+                // now rather than leaving them until the next alert.
+                if (intruderEmailConfigured) IntruderSendJob.schedule(context)
+                if (pendingEnableIntruder) {
+                    pendingEnableIntruder = false
+                    tryEnableIntruderAlerts()
+                }
+            },
+            onDismiss = {
+                showIntruderEmailDialog = false
+                pendingEnableIntruder = false
+            }
+        )
+    }
+
+    if (showIntruderCaptureDialog) {
+        IntruderCaptureModeDialog(
+            selected = intruderCaptureMode,
+            onSelect = { mode ->
+                intruderCaptureMode = mode
+                appLockRepository.setIntruderCaptureMode(mode)
+                showIntruderCaptureDialog = false
+                // Switching to video while it's already on: ask for the mic so sound works.
+                if (IntruderCapture.recordsVideo(mode) && intruderAlertsEnabled &&
+                    !IntruderCapture.hasMicrophonePermission(context)
+                ) {
+                    intruderPermissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                }
+            },
+            onDismiss = { showIntruderCaptureDialog = false }
+        )
+    }
+
+    if (showIntruderThresholdDialog) {
+        IntruderThresholdDialog(
+            selected = intruderThreshold,
+            onSelect = { tries ->
+                intruderThreshold = tries
+                appLockRepository.setIntruderThreshold(tries)
+                showIntruderThresholdDialog = false
+            },
+            onDismiss = { showIntruderThresholdDialog = false }
+        )
     }
 
     if (showUnlockTimeDialog) {
@@ -479,6 +623,113 @@ fun SettingsScreen(
                                 }
                             }
                         )
+                    )
+                )
+            }
+
+            item {
+                SectionTitle(text = stringResource(R.string.settings_screen_intruder_title))
+            }
+
+            item {
+                SettingsGroup(
+                    items = listOfNotNull(
+                        ToggleSettingItem(
+                            icon = Icons.Default.PhotoCamera,
+                            title = stringResource(R.string.settings_screen_intruder_control_title),
+                            subtitle = when {
+                                intruderAlertsEnabled -> stringResource(
+                                    R.string.settings_screen_intruder_desc_on,
+                                    intruderThreshold
+                                )
+                                !intruderEmailConfigured ->
+                                    stringResource(R.string.settings_screen_intruder_desc_needs_email)
+                                else -> stringResource(R.string.settings_screen_intruder_desc_off)
+                            },
+                            checked = intruderAlertsEnabled,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked) {
+                                    tryEnableIntruderAlerts()
+                                } else {
+                                    appLockRepository.setIntruderAlertsEnabled(false)
+                                    intruderAlertsEnabled = false
+                                }
+                            }
+                        ),
+                        ActionSettingItem(
+                            icon = if (IntruderCapture.recordsVideo(intruderCaptureMode))
+                                Icons.Default.Videocam else Icons.Default.PhotoCamera,
+                            title = stringResource(R.string.settings_screen_intruder_capture_title),
+                            subtitle = stringResource(captureModeLabel(intruderCaptureMode)),
+                            onClick = { showIntruderCaptureDialog = true }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Numbers,
+                            title = stringResource(R.string.settings_screen_intruder_threshold_title),
+                            subtitle = stringResource(
+                                R.string.settings_screen_intruder_threshold_desc,
+                                intruderThreshold
+                            ),
+                            onClick = { showIntruderThresholdDialog = true }
+                        ),
+                        ToggleSettingItem(
+                            icon = Icons.Default.LocationOn,
+                            title = stringResource(R.string.settings_screen_intruder_location_title),
+                            subtitle = stringResource(R.string.settings_screen_intruder_location_desc),
+                            checked = intruderLocation,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked && !IntruderLocation.hasPermission(context)) {
+                                    intruderLocationPermissionLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
+                                } else {
+                                    intruderLocation = isChecked
+                                    appLockRepository.setIntruderLocationEnabled(isChecked)
+                                }
+                            }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Email,
+                            title = stringResource(R.string.settings_screen_intruder_email_title),
+                            // A refusal Resend gives back, such as a recipient that needs a verified
+                            // domain, would otherwise only show up in the test alert.
+                            subtitle = when {
+                                intruderSendError != null -> stringResource(
+                                    R.string.settings_screen_intruder_email_desc_error,
+                                    intruderSendError.orEmpty()
+                                )
+
+                                intruderEmailConfigured -> stringResource(
+                                    R.string.settings_screen_intruder_email_desc_set,
+                                    appLockRepository.getIntruderEmailTo()
+                                )
+
+                                else -> stringResource(R.string.settings_screen_intruder_email_desc_unset)
+                            },
+                            onClick = { showIntruderEmailDialog = true }
+                        ),
+                        if (intruderEmailConfigured) ActionSettingItem(
+                            icon = Icons.AutoMirrored.Filled.Send,
+                            title = stringResource(R.string.settings_screen_intruder_test_title),
+                            subtitle = stringResource(R.string.settings_screen_intruder_test_desc),
+                            onClick = {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.settings_screen_intruder_test_running),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                coroutineScope.launch {
+                                    val message = IntruderAlerts.sendTest(context)
+                                    intruderSendError = appLockRepository.getIntruderSendError()
+                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        ) else null
                     )
                 )
             }
@@ -1416,6 +1667,162 @@ fun TrustedNetworksDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.settings_screen_trusted_networks_close))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+/** The Settings label for each capture mode. */
+private fun captureModeLabel(mode: IntruderCaptureMode): Int = when (mode) {
+    IntruderCaptureMode.PHOTO -> R.string.settings_screen_intruder_capture_photo
+    IntruderCaptureMode.VIDEO -> R.string.settings_screen_intruder_capture_video
+    IntruderCaptureMode.BOTH -> R.string.settings_screen_intruder_capture_both
+}
+
+@Composable
+fun IntruderCaptureModeDialog(
+    selected: IntruderCaptureMode,
+    onSelect: (IntruderCaptureMode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_screen_intruder_capture_dialog_title)) },
+        text = {
+            Column {
+                IntruderCaptureMode.entries.forEach { mode ->
+                    val label = stringResource(captureModeLabel(mode))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(mode) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected == mode, onClick = { onSelect(mode) })
+                        Text(text = label, modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_screen_trusted_networks_close))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+fun IntruderThresholdDialog(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_screen_intruder_threshold_dialog_title)) },
+        text = {
+            Column {
+                (PreferencesRepository.MIN_INTRUDER_THRESHOLD..PreferencesRepository.MAX_INTRUDER_THRESHOLD)
+                    .forEach { tries ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(tries) }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selected == tries, onClick = { onSelect(tries) })
+                            Text(
+                                text = stringResource(
+                                    R.string.settings_screen_intruder_threshold_option,
+                                    tries
+                                ),
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                    }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_screen_trusted_networks_close))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+fun IntruderEmailDialog(
+    hasStoredKey: Boolean,
+    from: String,
+    to: String,
+    onSave: (apiKey: String?, from: String, to: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var apiKey by remember { mutableStateOf("") }
+    var fromField by remember { mutableStateOf(from) }
+    var toField by remember { mutableStateOf(to) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_screen_intruder_email_dialog_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_screen_intruder_email_dialog_intro),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text(stringResource(R.string.settings_screen_intruder_email_api_key)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    supportingText = if (hasStoredKey) {
+                        { Text(stringResource(R.string.settings_screen_intruder_email_api_key_saved)) }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = fromField,
+                    onValueChange = { fromField = it },
+                    label = { Text(stringResource(R.string.settings_screen_intruder_email_from)) },
+                    singleLine = true,
+                    supportingText = {
+                        Text(stringResource(R.string.settings_screen_intruder_email_from_hint))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = toField,
+                    onValueChange = { toField = it },
+                    label = { Text(stringResource(R.string.settings_screen_intruder_email_to)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(apiKey.ifBlank { null }, fromField, toField) },
+                enabled = toField.isNotBlank() && (hasStoredKey || apiKey.isNotBlank())
+            ) {
+                Text(stringResource(R.string.settings_screen_intruder_email_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel_button))
             }
         },
         containerColor = MaterialTheme.colorScheme.surface

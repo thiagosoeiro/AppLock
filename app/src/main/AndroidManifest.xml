@@ -15,6 +15,18 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
 
+    <!-- Intruder alerts: emailed through Resend's API. Nothing else uses the network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Intruder alerts: a front-camera photo or video, with sound when the microphone is allowed. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
     <!-- Trusted Wi-Fi: Android only shares the connected network's name with location access. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -114,6 +126,12 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="accessibility" />
         </service>
+
+        <!-- Emails intruder alerts that couldn't be sent at once, when there is a network again. -->
+        <service
+            android:name=".core.intruder.IntruderSendJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <receiver
             android:name=".core.broadcast.DeviceAdmin"

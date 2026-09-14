@@ -83,6 +83,9 @@ class PasswordOverlayActivity: FragmentActivity() {
             return
         }
 
+        // For an intruder alert: which app the wrong code was entered against.
+        AppLockManager.appOnLockScreen = lockedPackageNameFromIntent
+
         enableEdgeToEdge()
 
         appLockRepository = applicationContext.appLockRepository()
@@ -340,6 +343,9 @@ class PasswordOverlayActivity: FragmentActivity() {
         super.onDestroy()
         AppLockManager.isLockScreenShown.set(false)
         AppLockManager.reportBiometricAuthFinished()
+        if (AppLockManager.appOnLockScreen == lockedPackageNameFromIntent) {
+            AppLockManager.appOnLockScreen = null
+        }
         Log.d(TAG, "PasswordOverlayActivity onDestroy for $lockedPackageNameFromIntent")
     }
 }

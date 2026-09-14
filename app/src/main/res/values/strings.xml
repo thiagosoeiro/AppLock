@@ -353,6 +353,43 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="settings_screen_trusted_networks_turn_on_location">Turn on Location</string>
     <string name="settings_screen_trusted_networks_close">Done</string>
 
+    <!-- Intruder alerts -->
+    <string name="settings_screen_intruder_title">Intruder alerts</string>
+    <string name="settings_screen_intruder_control_title">Intruder alerts</string>
+    <string name="settings_screen_intruder_desc_off">Email a front-camera photo or video after several wrong tries, so you see who has your phone.</string>
+    <string name="settings_screen_intruder_desc_needs_email">Set up the email below to turn this on.</string>
+    <string name="settings_screen_intruder_desc_on">Alerting after %1$d wrong tries in a row.</string>
+    <string name="settings_screen_intruder_capture_title">Capture</string>
+    <string name="settings_screen_intruder_capture_photo">Photo</string>
+    <string name="settings_screen_intruder_capture_video">Video (with sound if allowed)</string>
+    <string name="settings_screen_intruder_capture_both">Photo and video</string>
+    <string name="settings_screen_intruder_capture_dialog_title">What to capture</string>
+    <string name="settings_screen_intruder_threshold_title">After wrong tries</string>
+    <string name="settings_screen_intruder_threshold_desc">Send an alert once this many codes in a row are wrong (%1$d)</string>
+    <string name="settings_screen_intruder_threshold_dialog_title">Send after</string>
+    <string name="settings_screen_intruder_threshold_option">%1$d wrong tries</string>
+    <string name="settings_screen_intruder_location_title">Include location</string>
+    <string name="settings_screen_intruder_location_desc">Add the phone\'s location to the email as a map link</string>
+    <string name="settings_screen_intruder_location_denied">Location permission is needed to include the location</string>
+    <string name="settings_screen_intruder_email_title">Email (Resend)</string>
+    <string name="settings_screen_intruder_email_desc_set">Sending to %1$s</string>
+    <string name="settings_screen_intruder_email_desc_unset">Add your Resend API key and where to send alerts</string>
+    <string name="settings_screen_intruder_email_desc_error">Last alert wasn\'t sent: %1$s</string>
+    <string name="settings_screen_intruder_email_dialog_title">Email through Resend</string>
+    <string name="settings_screen_intruder_email_dialog_intro">Alerts are sent with your Resend account. Create a sending-only API key at resend.com and paste it here. Without a verified domain, keep the sender as onboarding@resend.dev and send only to your own Resend account address.</string>
+    <string name="settings_screen_intruder_email_api_key">Resend API key</string>
+    <string name="settings_screen_intruder_email_api_key_saved">A key is saved. Leave blank to keep it.</string>
+    <string name="settings_screen_intruder_email_from">From</string>
+    <string name="settings_screen_intruder_email_from_hint">Only onboarding@resend.dev works until you verify a domain in Resend.</string>
+    <string name="settings_screen_intruder_email_to">Send alerts to</string>
+    <string name="settings_screen_intruder_email_save">Save</string>
+    <string name="settings_screen_intruder_camera_needed">Camera permission is needed for intruder alerts</string>
+    <string name="settings_screen_intruder_enabled_no_sound">Alerts on. Video will record without sound until the microphone is allowed.</string>
+    <string name="settings_screen_intruder_test_title">Send a test alert</string>
+    <string name="settings_screen_intruder_test_desc">Capture and email one alert now to check your setup</string>
+    <string name="settings_screen_intruder_test_running">Sending a test alert…</string>
+    <string name="settings_screen_intruder_test_disabled">Set up the email first</string>
+
     <!-- Automation -->
     <string name="settings_screen_automation_title">Automation</string>
     <string name="settings_screen_automation_control_title">Allow automation apps</string>

@@ -90,6 +90,14 @@ object AppLockManager {
     var currentBiometricState: AppLockAccessibilityService.BiometricState? = null
 
     /**
+     * The package a lock screen is currently open for, or null when none is. An intruder alert
+     * names it, so the email says which app someone was trying to reach. Null there means the
+     * wrong code was entered somewhere without an app behind it, such as the app's own PIN screen.
+     */
+    @Volatile
+    var appOnLockScreen: String? = null
+
+    /**
      * Lets the biometric prompt hand control of the lock screen back and forth with whichever
      * service is showing it. Registered by [AppLockAccessibilityService] while it is alive; null
      * when another backend is in charge, since those draw their lock screen as an activity.

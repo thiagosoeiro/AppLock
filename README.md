@@ -68,10 +68,11 @@ root required.
 - Lock any app on your device
 - Anti-uninstall protection ([how it behaves, and the "System Services" disguise](ANTI_UNINSTALL.md))
 - Anti-uninstall protection for user apps
+- Intruder alerts: a front-camera photo or video emailed after wrong tries ([setup and details](INTRUDER_ALERTS.md))
 - Unlock timeout for convenience
 - No root required
 - One-tap app locking
-- All data stays on your device
+- All data stays on your device, except intruder alerts you turn on, which are emailed through your own Resend account
 - Real-time background protection
 - Lightweight and fast
 
