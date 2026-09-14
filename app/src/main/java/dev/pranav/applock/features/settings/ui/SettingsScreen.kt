@@ -56,6 +56,7 @@ import dev.pranav.applock.core.intruder.IntruderCapture
 import dev.pranav.applock.core.intruder.IntruderLocation
 import dev.pranav.applock.core.intruder.IntruderSendJob
 import dev.pranav.applock.core.navigation.Screen
+import dev.pranav.applock.core.network.ScreenTimeoutByNetwork
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.remotelock.RemoteLock
 import dev.pranav.applock.core.remotelock.RemoteLockListener
@@ -130,6 +131,16 @@ fun SettingsScreen(
         )
     }
     var locationEnabled by remember { mutableStateOf(TrustedNetworkMonitor.isLocationEnabled(context)) }
+    var screenTimeoutEnabled by remember { mutableStateOf(appLockRepository.isScreenTimeoutByNetworkEnabled()) }
+    var screenTimeoutTrustedSeconds by remember { mutableIntStateOf(appLockRepository.getScreenTimeoutTrustedSeconds()) }
+    var screenTimeoutAwaySeconds by remember { mutableIntStateOf(appLockRepository.getScreenTimeoutAwaySeconds()) }
+    var canWriteSettings by remember { mutableStateOf(ScreenTimeoutByNetwork.canWrite(context)) }
+    var showWriteSettingsDialog by remember { mutableStateOf(false) }
+    var showScreenTimeoutTrustedDialog by remember { mutableStateOf(false) }
+    var showScreenTimeoutAwayDialog by remember { mutableStateOf(false) }
+    var pendingEnableScreenTimeout by remember { mutableStateOf(false) }
+    // Which trusted Wi-Fi option asked for location access, so the grant turns that one on.
+    var locationRequestForScreenTimeout by remember { mutableStateOf(false) }
 
     var intruderAlertsEnabled by remember { mutableStateOf(appLockRepository.isIntruderAlertsEnabled()) }
     var intruderCaptureMode by remember { mutableStateOf(appLockRepository.getIntruderCaptureMode()) }
@@ -180,7 +191,7 @@ fun SettingsScreen(
                 hasLocationAccess = TrustedNetworkMonitor.hasLocationPermission(context) &&
                         TrustedNetworkMonitor.hasBackgroundLocationPermission(context)
                 locationEnabled = TrustedNetworkMonitor.isLocationEnabled(context)
-                if (trustedWifiEnabled) TrustedNetworkMonitor.refresh(context)
+                if (trustedWifiEnabled || screenTimeoutEnabled) TrustedNetworkMonitor.refresh(context)
                 // An alert can fail while this screen is away, so pick the reason up on return.
                 intruderSendError = appLockRepository.getIntruderSendError()
                 // SMS and notification access are granted in Android's settings, and the ways to
@@ -202,11 +213,34 @@ fun SettingsScreen(
         if (trustedWifiSsids.isEmpty()) showTrustedNetworksDialog = true
     }
 
+    fun enableScreenTimeout() {
+        appLockRepository.setScreenTimeoutByNetworkEnabled(true)
+        screenTimeoutEnabled = true
+        hasLocationAccess = true
+        // Also writes the timeout for the network the phone is on now.
+        TrustedNetworkMonitor.refresh(context)
+        if (trustedWifiSsids.isEmpty()) showTrustedNetworksDialog = true
+    }
+
+    fun disableScreenTimeout() {
+        appLockRepository.setScreenTimeoutByNetworkEnabled(false)
+        screenTimeoutEnabled = false
+        // Android keeps whatever was written last, so leave the shorter timeout behind.
+        ScreenTimeoutByNetwork.applyAway(context)
+        TrustedNetworkMonitor.refresh(context)
+    }
+
+    // Turns on whichever trusted Wi-Fi option asked for location access. The screen timeout checks
+    // "Modify system settings" before it asks.
+    fun onLocationAccessGranted() {
+        if (locationRequestForScreenTimeout) enableScreenTimeout() else enableTrustedWifi()
+    }
+
     val backgroundLocationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            enableTrustedWifi()
+            onLocationAccessGranted()
         } else {
             Toast.makeText(
                 context,
@@ -228,7 +262,7 @@ fun SettingsScreen(
                 ).show()
             }
 
-            TrustedNetworkMonitor.hasBackgroundLocationPermission(context) -> enableTrustedWifi()
+            TrustedNetworkMonitor.hasBackgroundLocationPermission(context) -> onLocationAccessGranted()
 
             // From Android 11, "Allow all the time" is only offered on its own settings page.
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
@@ -237,6 +271,62 @@ fun SettingsScreen(
 
             else -> backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
+    }
+
+    // Asks for whichever location access is still missing, for one of the trusted Wi-Fi options.
+    fun requestLocationAccess(forScreenTimeout: Boolean) {
+        locationRequestForScreenTimeout = forScreenTimeout
+        when {
+            !TrustedNetworkMonitor.hasLocationPermission(context) -> {
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            }
+
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> showBackgroundLocationDialog = true
+
+            else -> backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
+    }
+
+    // Turns the screen timeout option on once the phone's settings can be written and the network
+    // name can be read, asking for whichever is still missing.
+    fun tryEnableScreenTimeout() {
+        when {
+            !ScreenTimeoutByNetwork.canWrite(context) -> showWriteSettingsDialog = true
+
+            !TrustedNetworkMonitor.hasLocationPermission(context) ||
+                    !TrustedNetworkMonitor.hasBackgroundLocationPermission(context) ->
+                requestLocationAccess(forScreenTimeout = true)
+
+            else -> enableScreenTimeout()
+        }
+    }
+
+    // "Modify system settings" is granted on Android's own page, so carry on turning the screen
+    // timeout on when the user comes back from it.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+            canWriteSettings = ScreenTimeoutByNetwork.canWrite(context)
+            if (!pendingEnableScreenTimeout) return@LifecycleEventObserver
+
+            pendingEnableScreenTimeout = false
+            if (canWriteSettings) {
+                tryEnableScreenTimeout()
+            } else {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.settings_screen_screen_timeout_write_denied),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val intruderLocationPermissionLauncher = rememberLauncherForActivityResult(
@@ -478,6 +568,60 @@ fun SettingsScreen(
                 }
             },
             containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showWriteSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showWriteSettingsDialog = false },
+            title = { Text(stringResource(R.string.settings_screen_screen_timeout_write_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_screen_screen_timeout_write_dialog_text)) },
+            confirmButton = {
+                FilledTonalButton(
+                    onClick = {
+                        showWriteSettingsDialog = false
+                        pendingEnableScreenTimeout = true
+                        ScreenTimeoutByNetwork.openPermissionPage(context)
+                    }
+                ) {
+                    Text(stringResource(R.string.settings_screen_trusted_wifi_background_dialog_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWriteSettingsDialog = false }) {
+                    Text(stringResource(R.string.cancel_button))
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showScreenTimeoutTrustedDialog) {
+        ScreenTimeoutDialog(
+            title = stringResource(R.string.settings_screen_screen_timeout_trusted_dialog_title),
+            selected = screenTimeoutTrustedSeconds,
+            onSelect = { seconds ->
+                appLockRepository.setScreenTimeoutTrustedSeconds(seconds)
+                screenTimeoutTrustedSeconds = seconds
+                showScreenTimeoutTrustedDialog = false
+                // Writes the new value at once if it's the one in use.
+                if (screenTimeoutEnabled) TrustedNetworkMonitor.refresh(context)
+            },
+            onDismiss = { showScreenTimeoutTrustedDialog = false }
+        )
+    }
+
+    if (showScreenTimeoutAwayDialog) {
+        ScreenTimeoutDialog(
+            title = stringResource(R.string.settings_screen_screen_timeout_away_dialog_title),
+            selected = screenTimeoutAwaySeconds,
+            onSelect = { seconds ->
+                appLockRepository.setScreenTimeoutAwaySeconds(seconds)
+                screenTimeoutAwaySeconds = seconds
+                showScreenTimeoutAwayDialog = false
+                if (screenTimeoutEnabled) TrustedNetworkMonitor.refresh(context)
+            },
+            onDismiss = { showScreenTimeoutAwayDialog = false }
         )
     }
 
@@ -951,33 +1095,65 @@ fun SettingsScreen(
                                         TrustedNetworkMonitor.refresh(context)
                                     }
 
-                                    !TrustedNetworkMonitor.hasLocationPermission(context) -> {
-                                        locationPermissionLauncher.launch(
-                                            arrayOf(
-                                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                                Manifest.permission.ACCESS_COARSE_LOCATION
-                                            )
-                                        )
-                                    }
-
-                                    !TrustedNetworkMonitor.hasBackgroundLocationPermission(context) -> {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                            showBackgroundLocationDialog = true
-                                        } else {
-                                            backgroundLocationLauncher.launch(
-                                                Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                                            )
-                                        }
-                                    }
+                                    !TrustedNetworkMonitor.hasLocationPermission(context) ||
+                                            !TrustedNetworkMonitor.hasBackgroundLocationPermission(context) ->
+                                        requestLocationAccess(forScreenTimeout = false)
 
                                     else -> enableTrustedWifi()
                                 }
                             }
                         ),
+                        ToggleSettingItem(
+                            icon = Icons.Default.AvTimer,
+                            title = stringResource(R.string.settings_screen_screen_timeout_control_title),
+                            subtitle = when {
+                                !screenTimeoutEnabled ->
+                                    stringResource(R.string.settings_screen_screen_timeout_desc_off)
+
+                                !canWriteSettings ->
+                                    stringResource(R.string.settings_screen_screen_timeout_desc_needs_write)
+
+                                !hasLocationAccess ->
+                                    stringResource(R.string.settings_screen_screen_timeout_desc_needs_location)
+
+                                !locationEnabled ->
+                                    stringResource(R.string.settings_screen_screen_timeout_desc_location_off)
+
+                                trustedWifiSsids.isEmpty() ->
+                                    stringResource(R.string.settings_screen_trusted_wifi_desc_no_networks)
+
+                                trustedNetworkState.trusted -> stringResource(
+                                    R.string.settings_screen_screen_timeout_desc_trusted,
+                                    screenTimeoutLabel(context, screenTimeoutTrustedSeconds)
+                                )
+
+                                else -> stringResource(
+                                    R.string.settings_screen_screen_timeout_desc_not_trusted,
+                                    screenTimeoutLabel(context, screenTimeoutAwaySeconds)
+                                )
+                            },
+                            checked = screenTimeoutEnabled,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked) tryEnableScreenTimeout() else disableScreenTimeout()
+                            }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Home,
+                            title = stringResource(R.string.settings_screen_screen_timeout_trusted_title),
+                            subtitle = screenTimeoutLabel(context, screenTimeoutTrustedSeconds),
+                            onClick = { showScreenTimeoutTrustedDialog = true }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.WifiOff,
+                            title = stringResource(R.string.settings_screen_screen_timeout_away_title),
+                            subtitle = screenTimeoutLabel(context, screenTimeoutAwaySeconds),
+                            onClick = { showScreenTimeoutAwayDialog = true }
+                        ),
                         ActionSettingItem(
                             icon = Icons.Default.Router,
                             title = stringResource(R.string.settings_screen_trusted_networks_title),
-                            subtitle = if (trustedWifiEnabled)
+                            subtitle = if (trustedWifiEnabled || screenTimeoutEnabled)
                                 context.resources.getQuantityString(
                                     R.plurals.settings_screen_trusted_networks_count,
                                     trustedWifiSsids.size,
@@ -986,7 +1162,7 @@ fun SettingsScreen(
                             else
                                 stringResource(R.string.settings_screen_trusted_networks_desc_disabled),
                             onClick = {
-                                if (!trustedWifiEnabled) {
+                                if (!trustedWifiEnabled && !screenTimeoutEnabled) {
                                     Toast.makeText(
                                         context,
                                         context.getString(R.string.settings_screen_trusted_networks_desc_disabled),
@@ -1942,6 +2118,61 @@ fun IntruderThresholdDialog(
         containerColor = MaterialTheme.colorScheme.surface
     )
 }
+
+@Composable
+fun ScreenTimeoutDialog(
+    title: String,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                PreferencesRepository.SCREEN_TIMEOUT_OPTIONS_SECONDS.forEach { seconds ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(seconds) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected == seconds, onClick = { onSelect(seconds) })
+                        Text(
+                            text = screenTimeoutLabel(context, seconds),
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_screen_trusted_networks_close))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+/** A screen timeout as Settings shows it: "15 seconds", "2 minutes". */
+private fun screenTimeoutLabel(context: Context, seconds: Int): String =
+    if (seconds < 60) {
+        context.resources.getQuantityString(
+            R.plurals.settings_screen_screen_timeout_seconds,
+            seconds,
+            seconds
+        )
+    } else {
+        context.resources.getQuantityString(
+            R.plurals.settings_screen_screen_timeout_minutes,
+            seconds / 60,
+            seconds / 60
+        )
+    }
 
 @Composable
 fun IntruderEmailDialog(
