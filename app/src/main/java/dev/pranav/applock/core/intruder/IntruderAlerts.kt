@@ -140,14 +140,14 @@ object IntruderAlerts {
 
             // What actually came out of the camera, so the log can tell a working one from an alert
             // that went out empty. Never the location itself: the log gets exported.
-            val captured = if (attachments.isEmpty()) {
+            val capturedSummary = if (attachments.isEmpty()) {
                 "nothing captured"
             } else {
                 attachments.joinToString { "${it.extension} ${it.length() / 1024} kB" }
             }
             LogUtils.d(
                 TAG,
-                "Alert $id: $captured${captureNote?.let { "; camera: $it" }.orEmpty()}" +
+                "Alert $id: $capturedSummary${captureNote?.let { "; camera: $it" }.orEmpty()}" +
                         "; location ${if (location != null) "included" else "off"}"
             )
 
