@@ -81,9 +81,11 @@ fun MainScreen(
         applockEnabled = appLockRepository.isProtectEnabled()
     }
 
-    // On a trusted Wi-Fi network the shield is still on, but locked apps open freely: say so.
+    // On a trusted Wi-Fi network the shield is still on, but locked apps open freely: say so. Only
+    // when that option is on, though: trust is also tracked for the screen timeout alone.
     val trustedNetworkState by TrustedNetworkMonitor.state.collectAsState()
-    val relaxedByTrustedWifi = applockEnabled && trustedNetworkState.trusted
+    val relaxedByTrustedWifi = applockEnabled && trustedNetworkState.trusted &&
+            context.appLockRepository().isTrustedWifiEnabled()
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->

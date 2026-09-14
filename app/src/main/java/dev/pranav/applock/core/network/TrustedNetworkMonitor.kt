@@ -29,10 +29,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Tracks whether the phone is on a trusted Wi-Fi network, so the lock backends can let locked apps
- * open there without authentication (see `AppLockRepository.isProtectionActive`).
+ * Tracks whether the phone is on a trusted Wi-Fi network. It runs while either option that follows
+ * trust is on:
+ *  - "Open locked apps on trusted Wi-Fi" lets the lock backends open locked apps there without
+ *    authentication (see `AppLockRepository.isProtectionActive`);
+ *  - "Screen timeout by network" sets the longer screen timeout there, see [ScreenTimeoutByNetwork].
  *
- * Fails closed throughout, since this switches locking off:
+ * Fails closed throughout, since trust switches locking off and lengthens the screen timeout:
  *  - trust lives only in memory, so after a reboot or restart apps stay locked until Android
  *    reports a trusted network;
  *  - a network whose name can't be read - Location off, location access missing or limited to
@@ -73,6 +76,10 @@ object TrustedNetworkMonitor {
     private var receiver: BroadcastReceiver? = null
     private val ssidsByNetwork = HashMap<Network, String>()
 
+    // Whether trust is letting locked apps open: trusted, with "Open locked apps on trusted Wi-Fi"
+    // on. Leaving that state re-locks them; see updateRelaxing.
+    private var relaxing = false
+
     // For the log only: the last report logged for each Wi-Fi network, and the network carrying
     // the phone's internet.
     private val reportsByNetwork = HashMap<Network, String>()
@@ -82,15 +89,16 @@ object TrustedNetworkMonitor {
     fun isOnTrustedNetwork(): Boolean = _state.value.trusted
 
     /**
-     * Starts or stops monitoring to match the setting, then re-evaluates trust. Call it whenever the
-     * setting, the trusted networks or location access may have changed.
+     * Starts or stops monitoring to match the options, then re-evaluates trust and writes the screen
+     * timeout for it. Call it whenever an option, the trusted networks, the chosen timeouts or
+     * location access may have changed.
      */
     @Synchronized
     fun refresh(context: Context) {
         val app = context.applicationContext
         appContext = app
 
-        if (!app.appLockRepository().isTrustedWifiEnabled()) {
+        if (!app.appLockRepository().usesTrustedNetworks()) {
             stop(app)
             return
         }
@@ -108,6 +116,11 @@ object TrustedNetworkMonitor {
             registerNetworkCallback(app)
         }
         recompute(app)
+        // "Open locked apps" may have been switched while the screen timeout kept this running.
+        updateRelaxing(app)
+        // Android keeps the screen timeout through a restart while trust starts out false, so at app
+        // start this writes the shorter one. Holding this lock, it can't undo a newer trust change.
+        ScreenTimeoutByNetwork.apply(app, _state.value.trusted)
     }
 
     /** The name to show for [ssid]. Android quotes names that are valid UTF-8. */
@@ -377,13 +390,30 @@ object TrustedNetworkMonitor {
     private fun updateState(context: Context, newState: State) {
         val wasTrusted = _state.value.trusted
         _state.value = newState
-        if (newState.trusted == wasTrusted) return
+        if (newState.trusted != wasTrusted) {
+            LogUtils.d(TAG, if (newState.trusted) "On a trusted network" else "Not on a trusted network")
+            ScreenTimeoutByNetwork.apply(context, newState.trusted)
+        }
+        updateRelaxing(context)
+    }
 
-        if (newState.trusted) {
-            LogUtils.d(TAG, "On a trusted network, locked apps open without authentication")
+    /**
+     * Follows whether trust lets locked apps open: on a trusted network with "Open locked apps on
+     * trusted Wi-Fi" on. Leaving that re-locks everything, the same as turning the shield back on,
+     * whether trust dropped or the option was turned off. Trust kept only for the screen timeout
+     * never re-locks.
+     */
+    private fun updateRelaxing(context: Context) {
+        val repository = context.appLockRepository()
+        val nowRelaxing = _state.value.trusted && repository.isTrustedWifiEnabled()
+        if (nowRelaxing == relaxing) return
+        relaxing = nowRelaxing
+
+        if (nowRelaxing) {
+            LogUtils.d(TAG, "Locked apps open without authentication on this network")
         } else {
-            LogUtils.d(TAG, "Not on a trusted network, re-locking")
-            AppLockServiceStarter.relockAll(context, context.appLockRepository())
+            LogUtils.d(TAG, "Locked apps no longer open on trusted Wi-Fi, re-locking")
+            AppLockServiceStarter.relockAll(context, repository)
         }
     }
 
