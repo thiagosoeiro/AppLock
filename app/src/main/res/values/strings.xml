@@ -390,6 +390,34 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="settings_screen_intruder_test_running">Sending a test alert…</string>
     <string name="settings_screen_intruder_test_disabled">Set up the email first</string>
 
+    <!-- Remote lock -->
+    <string name="settings_screen_remote_lock_title">Remote lock</string>
+    <string name="settings_screen_remote_lock_control_title">Lock by message</string>
+    <string name="settings_screen_remote_lock_desc_off">Send a keyword to this phone by SMS or chat to switch protection on and lock it, if it\'s lost or lent.</string>
+    <string name="settings_screen_remote_lock_desc_on">On. A message saying only \"%1$s\" locks this phone.</string>
+    <string name="settings_screen_remote_lock_desc_no_access">On, but no message can reach it: allow SMS or notification access below.</string>
+    <string name="settings_screen_remote_lock_keyword_title">Keyword</string>
+    <string name="settings_screen_remote_lock_keyword_desc_unset">Not set</string>
+    <string name="settings_screen_remote_lock_keyword_desc_set">\"%1$s\"</string>
+    <string name="settings_screen_remote_lock_keyword_dialog_title">Remote lock keyword</string>
+    <string name="settings_screen_remote_lock_keyword_dialog_intro">Send this from another phone as a message on its own. Case, extra spaces and punctuation at either end don\'t matter.\n\nIt stays in the chat and can show in a notification, so pick something that reads like an ordinary message, such as a question. It can only lock this phone, never unlock it.</string>
+    <string name="settings_screen_remote_lock_keyword_label">Keyword</string>
+    <string name="settings_screen_remote_lock_keyword_hint">At least %1$d characters, including a letter: Android hides code-like text from apps.</string>
+    <string name="settings_screen_remote_lock_keyword_save">Save</string>
+    <string name="settings_screen_remote_lock_sms_title">SMS</string>
+    <string name="settings_screen_remote_lock_sms_desc_allowed">Allowed: plain SMS are checked</string>
+    <string name="settings_screen_remote_lock_sms_desc_denied">Not allowed. Tap to allow. RCS chats need notification access instead.</string>
+    <string name="settings_screen_remote_lock_sms_denied">SMS isn\'t allowed. If Android greyed it out, turn anti-uninstall off, open App info → ⋮ → Allow restricted settings, then try again.</string>
+    <string name="settings_screen_remote_lock_notifications_title">Notification access</string>
+    <string name="settings_screen_remote_lock_notifications_desc_allowed">Allowed: messages in any app\'s notifications are checked</string>
+    <string name="settings_screen_remote_lock_notifications_desc_denied">Not allowed. Tap to allow, for RCS chats, WhatsApp, Telegram and more.</string>
+    <string name="settings_screen_remote_lock_phone_title">Also lock the phone</string>
+    <string name="settings_screen_remote_lock_phone_desc">Lock the screen as well as the apps</string>
+    <string name="settings_screen_remote_lock_phone_desc_unavailable">Can\'t lock the screen yet: needs the accessibility service, or device admin with \"Lock the screen\"</string>
+    <string name="settings_screen_remote_lock_email_title">Email me when it locks</string>
+    <string name="settings_screen_remote_lock_email_desc">Send a short report through the intruder alert email</string>
+    <string name="settings_screen_remote_lock_email_desc_unset">Set up the email under Intruder alerts first</string>
+
     <!-- Automation -->
     <string name="settings_screen_automation_title">Automation</string>
     <string name="settings_screen_automation_control_title">Allow automation apps</string>
