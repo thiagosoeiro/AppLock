@@ -15,7 +15,7 @@ closing it.
 | 1 — Quick fixes | F5, F8, F19, F20 | `fix/security-quick-fixes` | [#5](https://github.com/thiagosoeiro/AppLock/pull/5) | green (`8aff4bd`) | done | `1a77897` |
 | 2 — Rate limiting | F4 | `fix/security-rate-limiting` | [#6](https://github.com/thiagosoeiro/AppLock/pull/6) | green (`8f790a9`) | LGTM | `fa1e06b` |
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
-| 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`4b2e651`) | first pass | — |
+| 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`cafddd4`) | 3 rounds | `9e2387c` |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -125,10 +125,11 @@ Merged in PR #7 after CI; signed off as LGTM. The same PR added this file and th
   still show ON after automation has turned protection off. And the log doesn't say whether a change
   came from the shield or from automation.
 
-## Chunk 4 — Anti-uninstall lock speed (in review)
+## Chunk 4 — Anti-uninstall lock speed (done)
 
 Not from the original scope. On 2026-09-12, with anti-uninstall on, device admin was deactivated and
-the app uninstalled on the phone, because the screen locked too late. PR #13, one commit per change.
+the app uninstalled on the phone, because the screen locked too late. PR #13, one commit per change,
+merged as `9e2387c`.
 
 - **Why it lost.** Every lock came from the accessibility service reading a page once it was on
   screen:
@@ -188,9 +189,9 @@ the app uninstalled on the phone, because the screen locked too late. PR #13, on
   accessibility service, so the device admin path had never been seen working — and it is the only
   path left once the accessibility service is going away. Settings → Advanced → **Test screen lock**,
   which appears while Logging is on, calls that path on its own, and the log answered: "Locked the
-  phone through device admin: test from settings". Still unverified: that `onUnbind` fires when the service is switched off (the
-  volume-key accessibility shortcut would show it, since it never opens the guarded page),
-  reinstalling over the app, and the Deactivate-tap and admin-removed locks.
+  phone through device admin: test from settings". Still unverified: that `onUnbind` fires when the
+  service is switched off (the volume-key accessibility shortcut would show it, since it never opens
+  the guarded page), reinstalling over the app, and the Deactivate-tap and admin-removed locks.
 - **Known gap, left as is.** After a guard locks, repeat matches are ignored for 2 s, so that
   Settings reporting one page twice doesn't lock twice. That window is cleared when the phone is
   unlocked — but the reappearing page and the unlock broadcast race each other, and if the page
