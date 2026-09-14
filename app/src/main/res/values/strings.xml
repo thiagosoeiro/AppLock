@@ -378,6 +378,7 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="settings_screen_intruder_email_api_key">Resend API key</string>
     <string name="settings_screen_intruder_email_api_key_saved">A key is saved. Leave blank to keep it.</string>
     <string name="settings_screen_intruder_email_from">From</string>
+    <string name="settings_screen_intruder_email_from_hint">Only onboarding@resend.dev works until you verify a domain in Resend.</string>
     <string name="settings_screen_intruder_email_to">Send alerts to</string>
     <string name="settings_screen_intruder_email_save">Save</string>
     <string name="settings_screen_intruder_camera_needed">Camera permission is needed for intruder alerts</string>

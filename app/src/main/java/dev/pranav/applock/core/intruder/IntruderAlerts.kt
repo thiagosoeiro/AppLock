@@ -9,7 +9,11 @@ import dev.pranav.applock.services.AppLockManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -84,46 +88,59 @@ object IntruderAlerts {
         }
     }
 
-    private suspend fun runAlert(failureCount: Int?, lockedPackage: String?) {
-        val repository = appContext.appLockRepository()
-        val outbox = IntruderOutbox(appContext)
-        val id = outbox.newId()
-        val createdAt = System.currentTimeMillis()
+    private suspend fun runAlert(failureCount: Int?, lockedPackage: String?) =
+        withContext(Dispatchers.IO) {
+            val repository = appContext.appLockRepository()
+            val outbox = IntruderOutbox(appContext)
+            val id = outbox.newId()
+            val createdAt = System.currentTimeMillis()
+            val mode = repository.getIntruderCaptureMode()
 
-        val mode = repository.getIntruderCaptureMode()
-        val captureNote: String?
-        val attachment = if (IntruderCapture.hasCameraPermission(appContext)) {
-            val file = outbox.captureFile(id, IntruderCapture.extensionFor(mode))
-            when (val result = IntruderCapture.capture(appContext, mode, file)) {
+            // The camera and the location fix are both slow and don't depend on each other, and the
+            // phone may be switched off at any moment, so they run side by side rather than in turn.
+            val (captured, location) = coroutineScope {
+                val captureTask = async {
+                    if (IntruderCapture.hasCameraPermission(appContext)) {
+                        val file = outbox.captureFile(id, IntruderCapture.extensionFor(mode))
+                        IntruderCapture.capture(appContext, mode, file)
+                    } else {
+                        IntruderCapture.Result.Failed("camera permission not granted")
+                    }
+                }
+                val locationTask = async {
+                    if (repository.isIntruderLocationEnabled()) {
+                        IntruderLocation.describe(appContext)
+                    } else {
+                        null
+                    }
+                }
+                captureTask.await() to locationTask.await()
+            }
+
+            val attachment: File?
+            val captureNote: String?
+            when (captured) {
                 is IntruderCapture.Result.Captured -> {
-                    captureNote = result.note
-                    result.file
+                    // The outbox only keeps a file with something in it, so the email must agree.
+                    attachment = captured.file.takeIf { it.exists() && it.length() > 0 }
+                    captureNote =
+                        if (attachment == null) "Capture failed: nothing was written" else captured.note
                 }
 
                 is IntruderCapture.Result.Failed -> {
-                    captureNote = "Capture failed: ${result.reason}"
-                    null
+                    attachment = null
+                    captureNote = "Capture failed: ${captured.reason}"
                 }
             }
-        } else {
-            captureNote = "Capture skipped: camera permission not granted"
-            null
-        }
 
-        val location = if (repository.isIntruderLocationEnabled()) {
-            IntruderLocation.describe(appContext)
-        } else {
-            null
-        }
+            val text = buildText(failureCount, lockedPackage, mode, captureNote, location)
+            outbox.add(id, createdAt, text, attachment)
 
-        val text = buildText(failureCount, lockedPackage, mode, captureNote, location)
-        outbox.add(id, createdAt, text, attachment)
-
-        val stillWaiting = IntruderSender.sendPending(appContext)
-        if (stillWaiting || !outbox.isEmpty()) {
-            IntruderSendJob.schedule(appContext)
+            val stillWaiting = IntruderSender.sendPending(appContext)
+            if (stillWaiting || !outbox.isEmpty()) {
+                IntruderSendJob.schedule(appContext)
+            }
         }
-    }
 
     private fun buildText(
         failureCount: Int?,

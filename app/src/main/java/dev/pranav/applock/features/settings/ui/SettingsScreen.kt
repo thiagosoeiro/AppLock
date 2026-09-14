@@ -54,6 +54,7 @@ import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.intruder.IntruderAlerts
 import dev.pranav.applock.core.intruder.IntruderCapture
 import dev.pranav.applock.core.intruder.IntruderLocation
+import dev.pranav.applock.core.intruder.IntruderSendJob
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
@@ -289,6 +290,9 @@ fun SettingsScreen(
                 appLockRepository.setIntruderEmail(apiKey, from, to)
                 intruderEmailConfigured = appLockRepository.isIntruderEmailConfigured()
                 showIntruderEmailDialog = false
+                // Alerts captured before the email worked are still waiting: give them another try
+                // now rather than leaving them until the next alert.
+                if (intruderEmailConfigured) IntruderSendJob.schedule(context)
                 if (pendingEnableIntruder) {
                     pendingEnableIntruder = false
                     tryEnableIntruderAlerts()
@@ -1783,6 +1787,9 @@ fun IntruderEmailDialog(
                     onValueChange = { fromField = it },
                     label = { Text(stringResource(R.string.settings_screen_intruder_email_from)) },
                     singleLine = true,
+                    supportingText = {
+                        Text(stringResource(R.string.settings_screen_intruder_email_from_hint))
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(

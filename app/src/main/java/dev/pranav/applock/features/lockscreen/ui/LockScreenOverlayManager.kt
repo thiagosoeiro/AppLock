@@ -241,7 +241,9 @@ class LockScreenOverlayManager(private val context: Context):
                 e.printStackTrace()
             }
             composeView = null
-            AppLockManager.appOnLockScreen = null
         }
+        // Outside the block above: the overlay can be gone already, and a stale package name here
+        // would put the wrong app in the next alert.
+        AppLockManager.appOnLockScreen = null
     }
 }
