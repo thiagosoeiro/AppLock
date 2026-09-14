@@ -28,18 +28,31 @@ object PhoneLocker {
             return true
         }
 
-        val dpm = context.getSystemService<DevicePolicyManager>()
-        if (dpm != null && DeviceAdmin.hasForceLock(context)) {
-            try {
-                dpm.lockNow()
-                LogUtils.d(TAG, "Locked the phone through device admin: $reason")
-                return true
-            } catch (e: SecurityException) {
-                LogUtils.e(TAG, "Device admin refused to lock the phone: $reason", e)
-            }
-        }
+        if (lockWithDeviceAdmin(context, reason)) return true
 
         LogUtils.e(TAG, "Could not lock the phone: $reason")
         return false
+    }
+
+    /**
+     * The device admin half of [lockPhone] on its own, for Settings' "Test screen lock". This is the
+     * only path left when the accessibility service is being turned off, and it stays silent when
+     * the force-lock policy is missing, so it is worth being able to check it on its own.
+     */
+    fun lockWithDeviceAdmin(context: Context, reason: String): Boolean {
+        val dpm = context.getSystemService<DevicePolicyManager>()
+        if (dpm == null || !DeviceAdmin.hasForceLock(context)) {
+            LogUtils.e(TAG, "Device admin has no force-lock policy, cannot lock: $reason")
+            return false
+        }
+
+        return try {
+            dpm.lockNow()
+            LogUtils.d(TAG, "Locked the phone through device admin: $reason")
+            true
+        } catch (e: SecurityException) {
+            LogUtils.e(TAG, "Device admin refused to lock the phone: $reason", e)
+            false
+        }
     }
 }

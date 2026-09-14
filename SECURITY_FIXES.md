@@ -180,9 +180,15 @@ the app uninstalled on the phone, because the screen locked too late. PR #13, on
   its header (`entity_header_title`) and `uninstall_button`, which the apps list lacks.
 - **Changed after the second test**, one commit: App info is recognised by our name in that header
   next to an Uninstall button, as well as by name-plus-version, so it bounces on One UI without a
-  scroll. Not yet retested. Still unverified on a phone: the uninstall dialog from the home screen,
-  reinstalling over the app, the Deactivate-tap and admin-removed locks, and the accessibility-off
-  lock through device admin.
+  scroll.
+- **Third phone test** (2026-09-14): App info locked 42 ms after the page opened, with no scroll,
+  and the apps list still didn't lock. The uninstall dialog locked as well, confirming the
+  either-order match, and the device admin page locked twice.
+- **Still unproven:** every lock so far has gone through the accessibility service, so the device
+  admin path has never been seen working. It is the only path left when the accessibility service
+  is being turned off, and that page locks the phone before its switch can be reached, so
+  Settings → Advanced → **Test screen lock** locks through device admin alone to check it. Also
+  unverified: reinstalling over the app, and the Deactivate-tap and admin-removed locks.
 
 ## Testing chunks 2 and 3
 

@@ -50,6 +50,7 @@ import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
+import dev.pranav.applock.core.utils.PhoneLocker
 import dev.pranav.applock.core.utils.canAuthenticateBiometrics
 import dev.pranav.applock.core.utils.hasUsagePermission
 import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
@@ -676,6 +677,20 @@ fun SettingsScreen(
                                 loggingEnabled = isChecked
                                 appLockRepository.setLoggingEnabled(isChecked)
                                 LogUtils.setLoggingEnabled(isChecked)
+                            }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Lock,
+                            title = stringResource(R.string.settings_screen_test_lock_title),
+                            subtitle = stringResource(R.string.settings_screen_test_lock_desc),
+                            onClick = {
+                                if (!PhoneLocker.lockWithDeviceAdmin(context, "test from settings")) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.settings_screen_test_lock_failed),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
                             }
                         )
                     )

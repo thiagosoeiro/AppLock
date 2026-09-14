@@ -287,6 +287,9 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="settings_screen_export_audit_desc">Export security logs for review.</string>
     <string name="settings_screen_export_logs_success">Logs exported</string>
     <string name="settings_screen_export_logs_error">Failed to export logs</string>
+    <string name="settings_screen_test_lock_title">Test screen lock</string>
+    <string name="settings_screen_test_lock_desc">Locks the screen through Device Administrator, to check that anti-uninstall can lock without the accessibility service.</string>
+    <string name="settings_screen_test_lock_failed">Device Administrator can\'t lock the screen. Grant it again from the main screen.</string>
     <string name="settings_screen_version_template">Version %1$s</string>
 
     <!-- Pattern Lock Strings -->
