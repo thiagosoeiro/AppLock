@@ -2,11 +2,23 @@ package dev.pranav.applock.core.remotelock
 
 import android.content.Context
 import dev.pranav.applock.core.broadcast.AutomationReceiver
+import dev.pranav.applock.core.intruder.IntruderLocation
+import dev.pranav.applock.core.intruder.IntruderOutbox
+import dev.pranav.applock.core.intruder.IntruderSendJob
+import dev.pranav.applock.core.intruder.IntruderSender
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.PhoneLocker
 import dev.pranav.applock.core.utils.appLockRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.text.Normalizer
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
@@ -32,9 +44,16 @@ object RemoteLock {
     // One SMS comes in by both channels, moments apart, and should act once.
     private const val REPEAT_WINDOW_MS = 60 * 1000L
 
+    // At most one confirmation email this often, so repeating the keyword can't use up Resend's
+    // daily allowance or push waiting intruder alerts out of the outbox.
+    private const val EMAIL_INTERVAL_MS = 10 * 60 * 1000L
+
     private val WHITESPACE = Regex("\\s+")
 
+    private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
     private val lock = Any()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Where a keyword message came in. */
     sealed interface Source {
@@ -47,6 +66,15 @@ object RemoteLock {
         FAILED("could not be locked"),
         OFF("left alone, its switch is off")
     }
+
+    /** What a remote lock did, for the confirmation email. */
+    private class Outcome(
+        val source: Source,
+        val at: Long,
+        val protectionWasOn: Boolean,
+        val phone: PhoneLock,
+        val onTrustedWifi: Boolean
+    )
 
     /**
      * The form messages and the keyword are compared in: letters or digits at both ends, runs of
@@ -79,19 +107,26 @@ object RemoteLock {
 
     /**
      * Acts on a message that matched the keyword. [sentAt] is when it was sent, as far as its channel
-     * can tell. Returns false when it was ignored: switched off, too old, a message already seen, or
-     * a remote lock ran moments ago. Never throws, so a channel can call it from Android's callback.
+     * can tell. Returns null when it was ignored: switched off, too old, a message already seen, or a
+     * remote lock ran moments ago. Otherwise returns the job emailing the confirmation, which ends at
+     * once when no email is due. Never throws, so a channel can call it from Android's callback.
      */
-    fun onKeywordMessage(context: Context, sentAt: Long, source: Source): Boolean {
+    fun onKeywordMessage(context: Context, sentAt: Long, source: Source): Job? {
         val appContext = context.applicationContext
         try {
-            if (!claim(appContext, sentAt, source)) return false
+            if (!claim(appContext, sentAt, source)) return null
         } catch (e: Exception) {
             LogUtils.e(TAG, "Checking a keyword message failed", e)
-            return false
+            return null
         }
-        lockDown(appContext, source)
-        return true
+        val outcome = lockDown(appContext, source)
+        return scope.launch(Dispatchers.IO) {
+            try {
+                emailConfirmation(appContext, outcome)
+            } catch (e: Exception) {
+                LogUtils.e(TAG, "Queuing the remote lock email failed", e)
+            }
+        }
     }
 
     /**
@@ -132,7 +167,8 @@ object RemoteLock {
      * Protection on and every app re-locked, the same way the shield and automation do it, then the
      * phone. Each part is tried even if the one before failed.
      */
-    private fun lockDown(context: Context, source: Source) {
+    private fun lockDown(context: Context, source: Source): Outcome {
+        val lockedAt = System.currentTimeMillis()
         val repository = context.appLockRepository()
         val protectionWasOn = repository.isProtectEnabled()
         try {
@@ -164,6 +200,91 @@ object RemoteLock {
             "Remote lock by ${describeForLog(source)}: protection $protection; " +
                     "phone ${phone.logText}$trusted"
         )
+        return Outcome(source, lockedAt, protectionWasOn, phone, onTrustedWifi)
+    }
+
+    /**
+     * Emails what the remote lock did through the intruder alert email settings and outbox, so
+     * whoever sent the message learns it worked. With no network it waits in the outbox like an
+     * alert, and goes out once there is one.
+     */
+    private suspend fun emailConfirmation(context: Context, outcome: Outcome) {
+        val repository = context.appLockRepository()
+        if (!repository.isRemoteLockEmailEnabled()) return
+        if (!repository.isIntruderEmailConfigured()) {
+            LogUtils.d(TAG, "No remote lock email: the email isn't set up")
+            return
+        }
+        val sinceLastEmail = outcome.at - repository.getRemoteLockLastEmailAt()
+        if (sinceLastEmail in 0 until EMAIL_INTERVAL_MS) {
+            LogUtils.d(TAG, "No remote lock email: one was queued ${sinceLastEmail / 60_000} min ago")
+            return
+        }
+        repository.setRemoteLockLastEmailAt(outcome.at)
+
+        val location = if (repository.isIntruderLocationEnabled()) {
+            IntruderLocation.describe(context)
+        } else {
+            null
+        }
+        val outbox = IntruderOutbox(context)
+        outbox.add(outbox.newId(), outcome.at, buildText(context, outcome, location), emptyList())
+        LogUtils.d(
+            TAG,
+            "Remote lock email queued; location ${if (location != null) "included" else "off"}"
+        )
+
+        val stillWaiting = IntruderSender.sendPending(context)
+        if (stillWaiting || !outbox.isEmpty()) {
+            IntruderSendJob.schedule(context)
+        }
+    }
+
+    private fun buildText(context: Context, outcome: Outcome, location: String?): String {
+        val at = Instant.ofEpochMilli(outcome.at)
+        val local = TIME_FORMAT.withZone(ZoneId.systemDefault()).format(at)
+        val utc = TIME_FORMAT.withZone(ZoneId.of("UTC")).format(at)
+        val receivedAs = when (val source = outcome.source) {
+            Source.Sms -> "an SMS"
+            is Source.Notification -> "a notification from ${appLabel(context, source.packageName)}"
+        }
+        val protection = if (outcome.protectionWasOn) {
+            "Protection: was already on, and every app is locked again"
+        } else {
+            "Protection: switched on, and every app is locked again"
+        }
+        val phone = when (outcome.phone) {
+            PhoneLock.LOCKED -> "Phone: locked"
+            PhoneLock.FAILED -> "Phone: could not be locked. That needs the accessibility service, " +
+                    "or device admin with \"Lock the screen\"."
+            PhoneLock.OFF -> "Phone: not locked, since \"Also lock the phone\" is off"
+        }
+
+        return buildString {
+            appendLine("This phone received the remote lock message.")
+            appendLine()
+            appendLine("When: $local (local)")
+            appendLine("      $utc (UTC)")
+            appendLine("Received as: $receivedAs")
+            appendLine(protection)
+            appendLine(phone)
+            if (outcome.onTrustedWifi) {
+                appendLine(
+                    "Trusted Wi-Fi: the phone is on a trusted network, so locked apps still open " +
+                            "while it stays connected."
+                )
+            }
+            location?.let { appendLine(it) }
+        }.trimEnd()
+    }
+
+    private fun appLabel(context: Context, packageName: String): String {
+        return try {
+            val pm = context.packageManager
+            "${pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0))} ($packageName)"
+        } catch (_: Exception) {
+            packageName
+        }
     }
 
     // The log gets exported, so it names the channel and the app, never the message or its sender.
