@@ -5,6 +5,7 @@ refine = "4.4.0"
 hiddenapibypass = "6.1"
 shizuku = "13.1.5"
 biometric = "1.4.0-alpha02"
+camerax = "1.6.2"
 fragmentKtx = "1.8.9"
 kotlin = "2.4.0"
 coreKtx = "1.19.0"
@@ -19,6 +20,10 @@ navigationCompose = "2.9.8"
 androidx-activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "activityCompose" }
 androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "annotation" }
 androidx-biometric = { module = "androidx.biometric:biometric-ktx", version.ref = "biometric" }
+androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+androidx-camera-video = { module = "androidx.camera:camera-video", version.ref = "camerax" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-fragment-ktx = { module = "androidx.fragment:fragment-ktx", version.ref = "fragmentKtx" }
 androidx-material-icons-core = { module = "androidx.compose.material:material-icons-core", version.ref = "materialIconsCore" }

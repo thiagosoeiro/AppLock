@@ -17,6 +17,15 @@
 
     <!-- Intruder alerts: emailed through Resend's API. Nothing else uses the network. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Intruder alerts: a front-camera photo or video, with sound when the microphone is allowed. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
 
     <!-- Trusted Wi-Fi: Android only shares the connected network's name with location access. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
