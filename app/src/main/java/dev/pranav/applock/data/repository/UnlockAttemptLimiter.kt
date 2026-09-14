@@ -46,8 +46,11 @@ class UnlockAttemptLimiter(context: Context) {
         }
     }
 
-    /** Counts a wrong entry, starting or lengthening the wait once the free tries are used up. */
-    fun recordFailure() {
+    /**
+     * Counts a wrong entry, starting or lengthening the wait once the free tries are used up, and
+     * returns the new running total so the caller can act on it, such as sending an intruder alert.
+     */
+    fun recordFailure(): Int {
         synchronized(LOCK) {
             val failures = prefs.getInt(KEY_FAILURES, 0) + 1
             val delay = delayFor(failures)
@@ -58,6 +61,7 @@ class UnlockAttemptLimiter(context: Context) {
                     putInt(KEY_BOOT_COUNT, bootCount())
                 }
             }
+            return failures
         }
     }
 

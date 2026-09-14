@@ -5,6 +5,9 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import dev.pranav.applock.core.broadcast.AutomationReceiver
+import dev.pranav.applock.core.intruder.IntruderAlerts
+import dev.pranav.applock.core.intruder.IntruderOutbox
+import dev.pranav.applock.core.intruder.IntruderSendJob
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.data.repository.AppLockRepository
@@ -35,6 +38,15 @@ class AppLockApplication : Application() {
 
         LogUtils.initialize(this)
         LogUtils.setLoggingEnabled(appLockRepository.isLoggingEnabled())
+
+        // Intruder alerts fire from the shared wrong-try count; queue a send for any still waiting,
+        // for example ones a reboot or a dead network left behind.
+        IntruderAlerts.initialize(this)
+        try {
+            if (!IntruderOutbox(this).isEmpty()) IntruderSendJob.schedule(this)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to schedule intruder alert sending", e)
+        }
 
         // Keep the exported receiver's component state in step with the preference, in case the
         // two drifted apart across a restore or an update.

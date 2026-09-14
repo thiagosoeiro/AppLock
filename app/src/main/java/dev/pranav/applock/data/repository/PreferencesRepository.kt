@@ -3,6 +3,7 @@ package dev.pranav.applock.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import dev.pranav.applock.core.intruder.IntruderAlerts
 import dev.pranav.applock.core.utils.SecurityUtils
 
 /**
@@ -140,7 +141,8 @@ class PreferencesRepository(context: Context) {
         if (isValid) {
             attemptLimiter.recordSuccess()
         } else if (input.length >= MIN_CREDENTIAL_LENGTH) {
-            attemptLimiter.recordFailure()
+            val failures = attemptLimiter.recordFailure()
+            IntruderAlerts.onWrongTry(failures)
         }
         return isValid
     }
