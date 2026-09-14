@@ -57,6 +57,7 @@ object IntruderAlerts {
         val threshold = repository.getIntruderThreshold()
         if (failureCount <= 0 || failureCount % threshold != 0 || failureCount / threshold > 3) return
 
+        LogUtils.d(TAG, "Wrong try $failureCount hit the alert threshold of $threshold")
         if (!running.compareAndSet(false, true)) {
             LogUtils.d(TAG, "An alert is already running; skipping this trigger")
             return
@@ -136,6 +137,19 @@ object IntruderAlerts {
                     captureNote = captured.reason
                 }
             }
+
+            // What actually came out of the camera, so the log can tell a working one from an alert
+            // that went out empty. Never the location itself: the log gets exported.
+            val captured = if (attachments.isEmpty()) {
+                "nothing captured"
+            } else {
+                attachments.joinToString { "${it.extension} ${it.length() / 1024} kB" }
+            }
+            LogUtils.d(
+                TAG,
+                "Alert $id: $captured${captureNote?.let { "; camera: $it" }.orEmpty()}" +
+                        "; location ${if (location != null) "included" else "off"}"
+            )
 
             val text = buildText(failureCount, lockedPackage, attachments, captureNote, location)
             outbox.add(id, createdAt, text, attachments)
