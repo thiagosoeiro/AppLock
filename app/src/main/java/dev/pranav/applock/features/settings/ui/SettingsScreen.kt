@@ -57,6 +57,9 @@ import dev.pranav.applock.core.intruder.IntruderLocation
 import dev.pranav.applock.core.intruder.IntruderSendJob
 import dev.pranav.applock.core.navigation.Screen
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
+import dev.pranav.applock.core.remotelock.RemoteLock
+import dev.pranav.applock.core.remotelock.RemoteLockListener
+import dev.pranav.applock.core.remotelock.RemoteLockSmsReceiver
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.PhoneLocker
 import dev.pranav.applock.core.utils.canAuthenticateBiometrics
@@ -68,6 +71,7 @@ import dev.pranav.applock.data.repository.BackendImplementation
 import dev.pranav.applock.data.repository.IntruderCaptureMode
 import dev.pranav.applock.data.repository.PreferencesRepository
 import dev.pranav.applock.features.admin.AdminDisableActivity
+import dev.pranav.applock.services.AppLockAccessibilityService
 import dev.pranav.applock.services.ShizukuAppLockService
 import dev.pranav.applock.services.UsageLockService
 import dev.pranav.applock.ui.icons.*
@@ -137,6 +141,16 @@ fun SettingsScreen(
     var showIntruderCaptureDialog by remember { mutableStateOf(false) }
     var showIntruderThresholdDialog by remember { mutableStateOf(false) }
     var pendingEnableIntruder by remember { mutableStateOf(false) }
+
+    var remoteLockEnabled by remember { mutableStateOf(appLockRepository.isRemoteLockEnabled()) }
+    var remoteLockKeyword by remember { mutableStateOf(appLockRepository.getRemoteLockKeyword()) }
+    var remoteLockPhone by remember { mutableStateOf(appLockRepository.isRemoteLockPhoneEnabled()) }
+    var remoteLockEmail by remember { mutableStateOf(appLockRepository.isRemoteLockEmailEnabled()) }
+    var hasSmsAccess by remember { mutableStateOf(RemoteLockSmsReceiver.hasPermission(context)) }
+    var hasNotificationAccess by remember { mutableStateOf(RemoteLockListener.hasAccess(context)) }
+    var phoneLockAvailable by remember { mutableStateOf(canLockPhone(context)) }
+    var showRemoteLockKeywordDialog by remember { mutableStateOf(false) }
+    var pendingEnableRemoteLock by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     var showPermissionDialog by remember { mutableStateOf(false) }
@@ -169,6 +183,11 @@ fun SettingsScreen(
                 if (trustedWifiEnabled) TrustedNetworkMonitor.refresh(context)
                 // An alert can fail while this screen is away, so pick the reason up on return.
                 intruderSendError = appLockRepository.getIntruderSendError()
+                // SMS and notification access are granted in Android's settings, and the ways to
+                // lock the phone can change there too.
+                hasSmsAccess = RemoteLockSmsReceiver.hasPermission(context)
+                hasNotificationAccess = RemoteLockListener.hasAccess(context)
+                phoneLockAvailable = canLockPhone(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -282,6 +301,70 @@ fun SettingsScreen(
                 intruderAlertsEnabled = true
             }
         }
+    }
+
+    // The SMS receiver is only part of the app while remote lock is on, like the automation receiver.
+    fun switchRemoteLock(enabled: Boolean) {
+        appLockRepository.setRemoteLockEnabled(enabled)
+        RemoteLockSmsReceiver.setComponentEnabled(context, enabled)
+        remoteLockEnabled = enabled
+    }
+
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasSmsAccess = isGranted
+        if (!isGranted) {
+            // On Android 15+ a sideloaded app is refused without a prompt until restricted settings
+            // are allowed for it, so say where that is.
+            Toast.makeText(
+                context,
+                context.getString(R.string.settings_screen_remote_lock_sms_denied),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        if (pendingEnableRemoteLock) {
+            pendingEnableRemoteLock = false
+            if (isGranted) switchRemoteLock(true)
+        }
+    }
+
+    // Turns remote lock on once there is a keyword and a way for a message to arrive, asking for
+    // whichever is missing. Notification access is granted in Android's settings, from its own row.
+    fun tryEnableRemoteLock() {
+        when {
+            appLockRepository.getRemoteLockKeyword() == null -> {
+                pendingEnableRemoteLock = true
+                showRemoteLockKeywordDialog = true
+            }
+
+            !RemoteLockSmsReceiver.hasPermission(context) &&
+                    !RemoteLockListener.hasAccess(context) -> {
+                pendingEnableRemoteLock = true
+                smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+            }
+
+            else -> switchRemoteLock(true)
+        }
+    }
+
+    if (showRemoteLockKeywordDialog) {
+        RemoteLockKeywordDialog(
+            keyword = remoteLockKeyword.orEmpty(),
+            onSave = { keyword ->
+                appLockRepository.setRemoteLockKeyword(keyword)
+                remoteLockKeyword = appLockRepository.getRemoteLockKeyword()
+                showRemoteLockKeywordDialog = false
+                if (pendingEnableRemoteLock) {
+                    pendingEnableRemoteLock = false
+                    tryEnableRemoteLock()
+                }
+            },
+            onDismiss = {
+                showRemoteLockKeywordDialog = false
+                pendingEnableRemoteLock = false
+            }
+        )
     }
 
     if (showIntruderEmailDialog) {
@@ -730,6 +813,110 @@ fun SettingsScreen(
                                 }
                             }
                         ) else null
+                    )
+                )
+            }
+
+            item {
+                SectionTitle(text = stringResource(R.string.settings_screen_remote_lock_title))
+            }
+
+            item {
+                SettingsGroup(
+                    items = listOf(
+                        ToggleSettingItem(
+                            icon = Icons.Default.PhonelinkLock,
+                            title = stringResource(R.string.settings_screen_remote_lock_control_title),
+                            subtitle = when {
+                                !remoteLockEnabled ->
+                                    stringResource(R.string.settings_screen_remote_lock_desc_off)
+
+                                !hasSmsAccess && !hasNotificationAccess ->
+                                    stringResource(R.string.settings_screen_remote_lock_desc_no_access)
+
+                                else -> stringResource(
+                                    R.string.settings_screen_remote_lock_desc_on,
+                                    remoteLockKeyword.orEmpty()
+                                )
+                            },
+                            checked = remoteLockEnabled,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked) tryEnableRemoteLock() else switchRemoteLock(false)
+                            }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Key,
+                            title = stringResource(R.string.settings_screen_remote_lock_keyword_title),
+                            subtitle = remoteLockKeyword?.let {
+                                stringResource(R.string.settings_screen_remote_lock_keyword_desc_set, it)
+                            } ?: stringResource(R.string.settings_screen_remote_lock_keyword_desc_unset),
+                            onClick = { showRemoteLockKeywordDialog = true }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.NotificationsActive,
+                            title = stringResource(R.string.settings_screen_remote_lock_notifications_title),
+                            subtitle = stringResource(
+                                if (hasNotificationAccess) {
+                                    R.string.settings_screen_remote_lock_notifications_desc_allowed
+                                } else {
+                                    R.string.settings_screen_remote_lock_notifications_desc_denied
+                                }
+                            ),
+                            onClick = { openNotificationAccessSettings(context) }
+                        ),
+                        ActionSettingItem(
+                            icon = Icons.Default.Sms,
+                            title = stringResource(R.string.settings_screen_remote_lock_sms_title),
+                            subtitle = stringResource(
+                                if (hasSmsAccess) {
+                                    R.string.settings_screen_remote_lock_sms_desc_allowed
+                                } else {
+                                    R.string.settings_screen_remote_lock_sms_desc_denied
+                                }
+                            ),
+                            // Once allowed, SMS is taken back in Android's App info, which
+                            // anti-uninstall bounces, so there is nothing to open from here.
+                            onClick = {
+                                if (!hasSmsAccess) {
+                                    smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+                                }
+                            }
+                        ),
+                        ToggleSettingItem(
+                            icon = Icons.Default.ScreenLockPortrait,
+                            title = stringResource(R.string.settings_screen_remote_lock_phone_title),
+                            subtitle = stringResource(
+                                if (phoneLockAvailable) {
+                                    R.string.settings_screen_remote_lock_phone_desc
+                                } else {
+                                    R.string.settings_screen_remote_lock_phone_desc_unavailable
+                                }
+                            ),
+                            checked = remoteLockPhone,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                remoteLockPhone = isChecked
+                                appLockRepository.setRemoteLockPhoneEnabled(isChecked)
+                            }
+                        ),
+                        ToggleSettingItem(
+                            icon = Icons.Default.Email,
+                            title = stringResource(R.string.settings_screen_remote_lock_email_title),
+                            subtitle = stringResource(
+                                if (intruderEmailConfigured) {
+                                    R.string.settings_screen_remote_lock_email_desc
+                                } else {
+                                    R.string.settings_screen_remote_lock_email_desc_unset
+                                }
+                            ),
+                            checked = remoteLockEmail && intruderEmailConfigured,
+                            enabled = intruderEmailConfigured,
+                            onCheckedChange = { isChecked ->
+                                remoteLockEmail = isChecked
+                                appLockRepository.setRemoteLockEmailEnabled(isChecked)
+                            }
+                        )
                     )
                 )
             }
@@ -1827,6 +2014,88 @@ fun IntruderEmailDialog(
         },
         containerColor = MaterialTheme.colorScheme.surface
     )
+}
+
+@Composable
+fun RemoteLockKeywordDialog(
+    keyword: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var field by remember { mutableStateOf(keyword) }
+    val valid = RemoteLock.isValidKeyword(field)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_screen_remote_lock_keyword_dialog_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_screen_remote_lock_keyword_dialog_intro),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedTextField(
+                    value = field,
+                    onValueChange = { field = it },
+                    label = { Text(stringResource(R.string.settings_screen_remote_lock_keyword_label)) },
+                    singleLine = true,
+                    isError = field.isNotBlank() && !valid,
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                R.string.settings_screen_remote_lock_keyword_hint,
+                                RemoteLock.MIN_KEYWORD_LENGTH
+                            )
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(field) }, enabled = valid) {
+                Text(stringResource(R.string.settings_screen_remote_lock_keyword_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel_button))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+/** Whether a remote lock could lock the screen right now, through accessibility or device admin. */
+private fun canLockPhone(context: Context): Boolean =
+    AppLockAccessibilityService.connectedInstance != null || DeviceAdmin.hasForceLock(context)
+
+/**
+ * Opens Android's notification access page for the remote lock listener: its own switch from
+ * Android 11, the list of apps before that or where a phone lacks the direct page.
+ */
+private fun openNotificationAccessSettings(context: Context) {
+    val listPage = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
+            Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+            android.content.ComponentName(context, RemoteLockListener::class.java).flattenToString()
+        )
+    } else {
+        listPage
+    }
+    try {
+        try {
+            context.startActivity(intent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            context.startActivity(listPage)
+        }
+    } catch (e: Exception) {
+        LogUtils.e("SettingsScreen", "Couldn't open the notification access page", e)
+    }
 }
 
 @Composable

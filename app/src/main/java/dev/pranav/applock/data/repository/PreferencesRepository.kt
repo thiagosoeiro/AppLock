@@ -330,6 +330,84 @@ class PreferencesRepository(context: Context) {
         return getIntruderEmailTo().isNotBlank() && !getIntruderApiKey().isNullOrBlank()
     }
 
+    /**
+     * Turning remote lock on also counts every message sent until now as seen, so a keyword already
+     * in a chat - a test, or one sent while it was off - can't act later.
+     */
+    fun setRemoteLockEnabled(enabled: Boolean) {
+        settingsPrefs.edit(commit = true) { putBoolean(KEY_REMOTE_LOCK_ENABLED, enabled) }
+        if (enabled) markRemoteLockMessagesSeen()
+    }
+
+    fun isRemoteLockEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_REMOTE_LOCK_ENABLED, false)
+    }
+
+    /**
+     * Stored as typed; matching ignores case, spacing and punctuation at either end. A message sent
+     * before the keyword was saved can't act either.
+     */
+    fun setRemoteLockKeyword(keyword: String) {
+        appLockPrefs.edit(commit = true) { putString(KEY_REMOTE_LOCK_KEYWORD, keyword.trim()) }
+        markRemoteLockMessagesSeen()
+    }
+
+    private fun markRemoteLockMessagesSeen() {
+        setRemoteLockLastMessageAt(maxOf(getRemoteLockLastMessageAt(), System.currentTimeMillis()))
+    }
+
+    fun getRemoteLockKeyword(): String? {
+        return appLockPrefs.getString(KEY_REMOTE_LOCK_KEYWORD, null)?.takeIf { it.isNotBlank() }
+    }
+
+    /** Whether a remote lock also locks the phone, not just the apps. */
+    fun setRemoteLockPhoneEnabled(enabled: Boolean) {
+        settingsPrefs.edit { putBoolean(KEY_REMOTE_LOCK_PHONE, enabled) }
+    }
+
+    fun isRemoteLockPhoneEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_REMOTE_LOCK_PHONE, true)
+    }
+
+    /** Whether a remote lock emails a confirmation through the intruder alert email settings. */
+    fun setRemoteLockEmailEnabled(enabled: Boolean) {
+        settingsPrefs.edit { putBoolean(KEY_REMOTE_LOCK_EMAIL, enabled) }
+    }
+
+    fun isRemoteLockEmailEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_REMOTE_LOCK_EMAIL, true)
+    }
+
+    /**
+     * When the newest keyword message seen was sent. An older one showing up - still listed in a chat
+     * notification, or the same SMS by the other channel - can't act again.
+     */
+    fun setRemoteLockLastMessageAt(sentAt: Long) {
+        settingsPrefs.edit(commit = true) { putLong(KEY_REMOTE_LOCK_LAST_MESSAGE_AT, sentAt) }
+    }
+
+    fun getRemoteLockLastMessageAt(): Long {
+        return settingsPrefs.getLong(KEY_REMOTE_LOCK_LAST_MESSAGE_AT, 0L)
+    }
+
+    /** When a keyword message last acted. */
+    fun setRemoteLockLastLockAt(lockedAt: Long) {
+        settingsPrefs.edit(commit = true) { putLong(KEY_REMOTE_LOCK_LAST_LOCK_AT, lockedAt) }
+    }
+
+    fun getRemoteLockLastLockAt(): Long {
+        return settingsPrefs.getLong(KEY_REMOTE_LOCK_LAST_LOCK_AT, 0L)
+    }
+
+    /** When the last remote lock confirmation email was queued. */
+    fun setRemoteLockLastEmailAt(queuedAt: Long) {
+        settingsPrefs.edit(commit = true) { putLong(KEY_REMOTE_LOCK_LAST_EMAIL_AT, queuedAt) }
+    }
+
+    fun getRemoteLockLastEmailAt(): Long {
+        return settingsPrefs.getLong(KEY_REMOTE_LOCK_LAST_EMAIL_AT, 0L)
+    }
+
     fun setUnlockTimeDuration(minutes: Int) {
         settingsPrefs.edit { putInt(KEY_UNLOCK_TIME_DURATION, minutes) }
     }
@@ -419,6 +497,13 @@ class PreferencesRepository(context: Context) {
         private const val KEY_INTRUDER_EMAIL_FROM = "intruder_email_from"
         private const val KEY_INTRUDER_EMAIL_TO = "intruder_email_to"
         private const val KEY_INTRUDER_SEND_ERROR = "intruder_send_error"
+        private const val KEY_REMOTE_LOCK_ENABLED = "remote_lock_enabled"
+        private const val KEY_REMOTE_LOCK_KEYWORD = "remote_lock_keyword"
+        private const val KEY_REMOTE_LOCK_PHONE = "remote_lock_phone"
+        private const val KEY_REMOTE_LOCK_EMAIL = "remote_lock_email"
+        private const val KEY_REMOTE_LOCK_LAST_MESSAGE_AT = "remote_lock_last_message_at"
+        private const val KEY_REMOTE_LOCK_LAST_LOCK_AT = "remote_lock_last_lock_at"
+        private const val KEY_REMOTE_LOCK_LAST_EMAIL_AT = "remote_lock_last_email_at"
 
         private const val DEFAULT_PROTECT_ENABLED = true
         private const val DEFAULT_AUTOMATION_ENABLED = false

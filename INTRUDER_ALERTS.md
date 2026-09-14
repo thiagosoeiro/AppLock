@@ -57,6 +57,9 @@ You need a [Resend](https://resend.com) account and an API key.
 3. Use **Send a test alert** to check the whole thing end to end. It captures and emails one
    alert now and shows the result, or Resend's own error if something is wrong.
 
+The same email settings also send [remote lock](REMOTE_LOCK.md) reports, if you turn those on.
+They wait and retry in the same outbox as alerts.
+
 ### The sender and recipient without a domain
 
 Until you verify a domain in Resend, Resend only lets you send **from `onboarding@resend.dev`**

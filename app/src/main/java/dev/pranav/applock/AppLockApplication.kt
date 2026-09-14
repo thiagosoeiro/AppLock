@@ -9,6 +9,7 @@ import dev.pranav.applock.core.intruder.IntruderAlerts
 import dev.pranav.applock.core.intruder.IntruderOutbox
 import dev.pranav.applock.core.intruder.IntruderSendJob
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
+import dev.pranav.applock.core.remotelock.RemoteLockSmsReceiver
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.data.repository.AppLockRepository
 import org.lsposed.hiddenapibypass.HiddenApiBypass
@@ -48,9 +49,10 @@ class AppLockApplication : Application() {
             Log.e(TAG, "Failed to schedule intruder alert sending", e)
         }
 
-        // Keep the exported receiver's component state in step with the preference, in case the
+        // Keep the exported receivers' component states in step with their preferences, in case the
         // two drifted apart across a restore or an update.
         AutomationReceiver.setComponentEnabled(this, appLockRepository.isAutomationEnabled())
+        RemoteLockSmsReceiver.setComponentEnabled(this, appLockRepository.isRemoteLockEnabled())
 
         // Trust in a Wi-Fi network is never stored, so every start is protected until Android
         // reports the network the phone is on. A failure here must not crash the app on every start,
