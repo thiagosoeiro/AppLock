@@ -184,11 +184,22 @@ the app uninstalled on the phone, because the screen locked too late. PR #13, on
 - **Third phone test** (2026-09-14): App info locked 42 ms after the page opened, with no scroll,
   and the apps list still didn't lock. The uninstall dialog locked as well, confirming the
   either-order match, and the device admin page locked twice.
-- **Still unproven:** every lock so far has gone through the accessibility service, so the device
-  admin path has never been seen working. It is the only path left when the accessibility service
-  is being turned off, and that page locks the phone before its switch can be reached, so
-  Settings → Advanced → **Test screen lock** locks through device admin alone to check it. Also
-  unverified: reinstalling over the app, and the Deactivate-tap and admin-removed locks.
+- **Device admin locking is proven** (2026-09-14). Every lock until then had gone through the
+  accessibility service, so the device admin path had never been seen working — and it is the only
+  path left once the accessibility service is going away. Settings → Advanced → **Test screen lock**
+  calls that path on its own, and the log answered: "Locked the phone through device admin: test
+  from settings". Still unverified: that `onUnbind` fires when the service is switched off (the
+  volume-key accessibility shortcut would show it, since it never opens the guarded page),
+  reinstalling over the app, and the Deactivate-tap and admin-removed locks.
+- **Known gap, left as is.** After a guard locks, repeat matches are ignored for 2 s, so that
+  Settings reporting one page twice doesn't lock twice. That window is cleared when the phone is
+  unlocked — but the reappearing page and the unlock broadcast race each other, and if the page
+  wins it is taken for a duplicate and suppressed, leaving a second or two on that page unguarded.
+  In testing this made the Accessibility page's switch reachable once. Judged low priority: it only
+  helps someone who already knows the phone's PIN, who can get through every layer anyway (F18),
+  and device admin still blocks uninstall and still locks from the admin callbacks. The fix, if it
+  is ever worth it: also clear the window when the screen turns off, which our own lock causes at
+  once, so only the duplicates arriving before the screen is off are swallowed.
 
 ## Testing chunks 2 and 3
 
