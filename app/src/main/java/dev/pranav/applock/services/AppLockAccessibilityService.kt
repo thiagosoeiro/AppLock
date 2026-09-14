@@ -99,6 +99,12 @@ class AppLockAccessibilityService : AccessibilityService() {
         // How close together the installer's uninstall screen and our name must appear, either order.
         private const val INSTALLER_UNINSTALL_WINDOW_MS = 3_000L
 
+        // View IDs that mark the App info page, from a One UI 8.5 log: the header holds the app name
+        // and the page has an Uninstall button. The apps list has neither. Matched as substrings, so
+        // the "com.android.settings:id/" prefix is not assumed.
+        private const val APP_INFO_HEADER_ID = "entity_header_title"
+        private const val APP_INFO_UNINSTALL_ID = "uninstall_button"
+
         // After a guard locks the phone, how long it ignores the same attempt matching again.
         private const val BLOCK_REPEAT_WINDOW_MS = 2_000L
 
@@ -579,11 +585,12 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Diagnostics for the App info check, which never fires on One UI: its App info page keeps the
-     * version off screen. For a Settings page that shows our name but isn't matched as App info,
-     * logs once per page how Settings built it - every view ID on screen, and which views hold our
-     * name - so a later change can tell App info from the lists our name appears in. View IDs and
-     * classes only, never page text, and only while logging is on.
+     * Diagnostics for [isOwnAppInfoPage]. For a Settings page that shows our name but isn't matched
+     * as App info - an app list, or an App info page an OEM builds differently - logs once per page
+     * how Settings built it: every view ID on screen, and which views hold our name. That is what
+     * turned up [APP_INFO_HEADER_ID] and [APP_INFO_UNINSTALL_ID] on One UI, and would show a further
+     * OEM's ids if the check misses there. View IDs and classes only, never page text, and only
+     * while logging is on.
      */
     private fun describePageShowingOurName(root: AccessibilityNodeInfo) {
         if (guardedPageDescribed || !appLockRepository.isLoggingEnabled()) return
@@ -666,19 +673,53 @@ class AppLockAccessibilityService : AccessibilityService() {
      *
      * Matching the name alone is not enough. The apps list and Accessibility > Installed apps are
      * windows that carry our name too, as one row among many, and returning to either restores the
-     * scroll position that shows it - which locked the phone while merely browsing Settings. So
-     * require our version number on screen as well: Settings prints it on the App info page, app
-     * lists never do, and a version needs no localised string to recognise.
+     * scroll position that shows it - which locked the phone while merely browsing Settings. Two
+     * shapes tell the App info page apart from those lists:
      *
-     * Fails open. If an OEM's page omits the version this does not fire, leaving that page
-     * unguarded rather than locking the phone on the wrong screen - and Uninstall and Force stop
-     * there are blocked and greyed out by device admin regardless.
+     * - **Our name plus our version.** Settings prints the version on the App info page and never in
+     *   an app list. Works across OEMs, but on One UI 8.5 the version is off screen until the page
+     *   is scrolled, so this alone missed it.
+     * - **Our name in the header, next to an Uninstall button.** From a One UI log: the App info
+     *   page holds the app name in [APP_INFO_HEADER_ID] and has an [APP_INFO_UNINSTALL_ID] button;
+     *   the apps list has neither. Requiring our name *in the header* keeps another app's App info
+     *   page from matching.
+     *
+     * Fails open. If neither shape is present this does not fire, leaving that page unguarded rather
+     * than locking the phone on the wrong screen - and Uninstall and Force stop there are blocked
+     * and greyed out by device admin regardless.
      */
     private fun isOwnAppInfoPage(root: AccessibilityNodeInfo): Boolean {
-        if (ownVersionName.isEmpty()) return false
+        val label = ownLabel
+        val version = ownVersionName
+        var labelSeen = false
+        var versionSeen = false
+        var labelInHeader = false
+        var uninstallButtonSeen = false
 
-        val wanted = listOf(ownLabel, ownVersionName)
-        return findTexts(root, wanted).size == wanted.size
+        fun visit(node: AccessibilityNodeInfo) {
+            val id = node.viewIdResourceName
+            val text = node.text?.toString()
+            if (text != null) {
+                if (text.contains(label, ignoreCase = true)) {
+                    labelSeen = true
+                    if (id?.contains(APP_INFO_HEADER_ID) == true) labelInHeader = true
+                }
+                if (version.isNotEmpty() && text.contains(version)) versionSeen = true
+            }
+            if (id?.contains(APP_INFO_UNINSTALL_ID) == true) uninstallButtonSeen = true
+            for (i in 0 until node.childCount) {
+                visit(node.getChild(i) ?: continue)
+            }
+        }
+
+        try {
+            visit(root)
+        } catch (e: Exception) {
+            logError("Error reading app info page", e)
+            return false
+        }
+
+        return (versionSeen && labelSeen) || (labelInHeader && uninstallButtonSeen)
     }
 
     /**
