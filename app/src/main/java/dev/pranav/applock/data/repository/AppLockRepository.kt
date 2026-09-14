@@ -108,6 +108,28 @@ class AppLockRepository(private val context: Context) {
     fun addTrustedWifiSsid(ssid: String) = preferencesRepository.addTrustedWifiSsid(ssid)
     fun removeTrustedWifiSsid(ssid: String) = preferencesRepository.removeTrustedWifiSsid(ssid)
 
+    fun setScreenTimeoutByNetworkEnabled(enabled: Boolean) =
+        preferencesRepository.setScreenTimeoutByNetworkEnabled(enabled)
+
+    fun isScreenTimeoutByNetworkEnabled(): Boolean =
+        preferencesRepository.isScreenTimeoutByNetworkEnabled()
+
+    fun setScreenTimeoutTrustedSeconds(seconds: Int) =
+        preferencesRepository.setScreenTimeoutTrustedSeconds(seconds)
+
+    fun getScreenTimeoutTrustedSeconds(): Int = preferencesRepository.getScreenTimeoutTrustedSeconds()
+    fun setScreenTimeoutAwaySeconds(seconds: Int) =
+        preferencesRepository.setScreenTimeoutAwaySeconds(seconds)
+
+    fun getScreenTimeoutAwaySeconds(): Int = preferencesRepository.getScreenTimeoutAwaySeconds()
+
+    /**
+     * Whether any option follows the trusted networks, so [TrustedNetworkMonitor] has to run. Only
+     * "Open locked apps on trusted Wi-Fi" relaxes locking; see [isProtectionActive].
+     */
+    fun usesTrustedNetworks(): Boolean =
+        isTrustedWifiEnabled() || isScreenTimeoutByNetworkEnabled()
+
     fun setIntruderAlertsEnabled(enabled: Boolean) =
         preferencesRepository.setIntruderAlertsEnabled(enabled)
 
