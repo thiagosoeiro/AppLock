@@ -13,7 +13,9 @@ launcher or Settings has nothing obvious to remove:
 - **Icon:** a plain gear, matching themed icons on Android 13+.
 - **Notification:** the background-service notification reads *System Services / Running*, not
   "Protecting your apps".
-- **Recents:** on Android 13+ the app shows a blank thumbnail instead of your list of locked apps.
+- **Recents:** the app stays out of Recents once you leave it; open it again from its icon. While
+  it is on screen Android still shows its card, and on Android 13+ that card is blank instead of
+  your list of locked apps.
 
 The disguise is **fixed at build time, not a setting.** Only the launcher entry could be swapped at
 runtime; Settings → Apps, Accessibility, Device admin apps and the uninstall dialog all read the
