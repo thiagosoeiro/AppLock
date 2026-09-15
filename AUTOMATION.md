@@ -109,7 +109,8 @@ holding an unlocked phone with USB debugging on.
 For the most common condition no automation app is needed. **Settings → Trusted Wi-Fi** lets locked
 apps open without authentication while the phone is connected to a network you trust, and keeps
 them locked everywhere else. The same networks can also
-[set the screen timeout](#screen-timeout-by-network).
+[set the screen timeout](#screen-timeout-by-network) and
+[show or hide notification content on the lock screen](#lock-screen-notification-content-by-network).
 
 ### Setup
 
@@ -188,3 +189,50 @@ Limits:
 - A timeout you set by hand in the phone's settings is replaced at the next of those writes.
 - The one-bar case above keeps the longer timeout until the Wi-Fi disconnects.
 - Without Modify system settings nothing is written, and the option's description says so.
+
+### Lock-screen notification content by network
+
+**Settings → Trusted Wi-Fi → Notification content by network** shows notification content on the
+lock screen while the phone is on a trusted network, and hides it everywhere else. A locked phone
+away from home then shows that notifications arrived, but not what they say or any codes in them.
+It changes the same setting as the phone's own choice between showing and hiding content on the lock
+screen.
+
+It has its own switch and uses the same trusted networks, so it works with or without the other two
+options. On its own it never lets locked apps open, and the shield doesn't show **HOME**.
+
+1. Turn on **Notification content by network**. Android lets only Shizuku or a computer with ADB
+   allow the app to change this setting, and only once:
+   - with Shizuku running, tap **Grant with Shizuku**, and allow the app in Shizuku if it asks;
+   - or, from a computer with USB debugging, run the command the dialog shows, then tap **Check
+     again**:
+
+     ```
+     adb shell pm grant dev.pranav.applock android.permission.WRITE_SECURE_SETTINGS
+     ```
+
+   Then allow location as for trusted Wi-Fi.
+2. Add your networks under **Trusted networks**, if they aren't there already.
+
+The grant opens no settings page, so anti-uninstall doesn't get in the way. It stays through app
+updates and reboots, but an uninstall removes it.
+
+The app writes the setting at the same moments as the screen timeout:
+
+- when the phone joins or leaves a trusted network, including the screen-on check;
+- when the app starts, and when you open its Settings screen;
+- when you turn the option off, which leaves content hidden.
+
+It fails closed the same way. Each start hides content until Android reports a trusted network, and
+anything that counts as untrusted keeps it hidden.
+
+Limits:
+
+- Only the content is switched. If the phone shows no notifications on the lock screen at all,
+  nothing shows either way.
+- A choice you make by hand in the phone's settings is replaced at the next of those writes.
+- The one-bar case keeps content showing until the Wi-Fi disconnects.
+- If Android misses the phone leaving a network while the screen is off, content can show for a
+  moment after the screen turns on, until the screen-on check hides it.
+- A work profile has its own setting, which isn't changed.
+- Without the grant nothing is written, and the option's description says so.
