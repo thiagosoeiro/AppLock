@@ -277,6 +277,14 @@ class PreferencesRepository(context: Context) {
             .takeIf { it in SCREEN_TIMEOUT_OPTIONS_SECONDS } ?: DEFAULT_SCREEN_TIMEOUT_AWAY_SECONDS
     }
 
+    fun setLockScreenContentByNetworkEnabled(enabled: Boolean) {
+        settingsPrefs.edit(commit = true) { putBoolean(KEY_LOCK_SCREEN_CONTENT_BY_NETWORK_ENABLED, enabled) }
+    }
+
+    fun isLockScreenContentByNetworkEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_LOCK_SCREEN_CONTENT_BY_NETWORK_ENABLED, false)
+    }
+
     fun setIntruderAlertsEnabled(enabled: Boolean) {
         settingsPrefs.edit(commit = true) { putBoolean(KEY_INTRUDER_ALERTS_ENABLED, enabled) }
     }
@@ -522,6 +530,7 @@ class PreferencesRepository(context: Context) {
         private const val KEY_SCREEN_TIMEOUT_BY_NETWORK_ENABLED = "screen_timeout_by_network_enabled"
         private const val KEY_SCREEN_TIMEOUT_TRUSTED_SECONDS = "screen_timeout_trusted_seconds"
         private const val KEY_SCREEN_TIMEOUT_AWAY_SECONDS = "screen_timeout_away_seconds"
+        private const val KEY_LOCK_SCREEN_CONTENT_BY_NETWORK_ENABLED = "lock_screen_content_by_network_enabled"
         private const val KEY_INTRUDER_ALERTS_ENABLED = "intruder_alerts_enabled"
         private const val KEY_INTRUDER_CAPTURE_MODE = "intruder_capture_mode"
         private const val KEY_INTRUDER_THRESHOLD = "intruder_threshold"

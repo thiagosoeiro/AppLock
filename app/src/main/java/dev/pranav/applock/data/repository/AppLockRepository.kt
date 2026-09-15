@@ -123,12 +123,19 @@ class AppLockRepository(private val context: Context) {
 
     fun getScreenTimeoutAwaySeconds(): Int = preferencesRepository.getScreenTimeoutAwaySeconds()
 
+    fun setLockScreenContentByNetworkEnabled(enabled: Boolean) =
+        preferencesRepository.setLockScreenContentByNetworkEnabled(enabled)
+
+    fun isLockScreenContentByNetworkEnabled(): Boolean =
+        preferencesRepository.isLockScreenContentByNetworkEnabled()
+
     /**
      * Whether any option follows the trusted networks, so [TrustedNetworkMonitor] has to run. Only
      * "Open locked apps on trusted Wi-Fi" relaxes locking; see [isProtectionActive].
      */
     fun usesTrustedNetworks(): Boolean =
-        isTrustedWifiEnabled() || isScreenTimeoutByNetworkEnabled()
+        isTrustedWifiEnabled() || isScreenTimeoutByNetworkEnabled() ||
+                isLockScreenContentByNetworkEnabled()
 
     fun setIntruderAlertsEnabled(enabled: Boolean) =
         preferencesRepository.setIntruderAlertsEnabled(enabled)

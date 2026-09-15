@@ -25,7 +25,7 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 14 | [Lock remotely by message](#14-lock-remotely-by-message) | Medium | Built, see [REMOTE_LOCK.md](REMOTE_LOCK.md) |
 | 15 | [Spoken warning or alarm](#15-spoken-warning-or-alarm) | Small | Not started |
 | 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#screen-timeout-by-network) |
-| 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Not started |
+| 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#lock-screen-notification-content-by-network) |
 
 ## Against someone holding the unlocked phone
 
@@ -210,20 +210,20 @@ A Quick Settings tile that re-locks every app at once, for handing the phone to 
 
 ## Following trusted Wi-Fi
 
-Two phone settings that could switch with the trusted networks from
+Two phone settings that switch with the trusted networks from
 [AUTOMATION.md](AUTOMATION.md#built-in-trusted-wi-fi): relaxed on a trusted network, strict
 everywhere else. Both share this design:
 
 - **Own switches, shared networks.** Each setting gets its own switch and uses the same trusted
-  network list, so neither requires letting locked apps open on trusted Wi-Fi. Since item 16,
+  network list, so neither requires letting locked apps open on trusted Wi-Fi.
   `TrustedNetworkMonitor` runs while any option that follows trust is on
-  (`AppLockRepository.usesTrustedNetworks`), and only "Open locked apps on trusted Wi-Fi" re-locks
-  when trust ends. Item 17 would join that check.
+  (`AppLockRepository.usesTrustedNetworks`, which counts both items), and only "Open locked apps on
+  trusted Wi-Fi" re-locks when trust ends.
 - **Fail closed, although Android stores the value.** Trust lives in memory, but these settings are
   saved by Android and outlive the app. Write the strict value whenever the app starts, whenever
   trust drops and when the switch is turned off, and the relaxed value only while trust holds.
-  Item 16 writes from `TrustedNetworkMonitor.refresh`, which runs at every start while trust is still
-  false, and from `updateState` on each trust change.
+  Both items write from `TrustedNetworkMonitor.refresh`, which runs at every start while trust is
+  still false, and from `updateState` on each trust change.
 - **No timer.** Writes follow the trust changes the app already tracks. If Android misses the phone
   leaving a network, the screen-on check drops trust, so a wrong value lasts only a moment after
   the screen turns on.
@@ -242,6 +242,11 @@ time a snatched phone stays unlocked away from home. Both durations are settings
 - **Check first:** a timeout changed by hand is overwritten at the next trust change.
 
 ### 17. Lock-screen notification content by network
+
+**Built — see [AUTOMATION.md](AUTOMATION.md#lock-screen-notification-content-by-network).** It has
+its own switch under Settings → Trusted Wi-Fi and follows the shared design above. The permission is
+granted once, through Shizuku or the adb command below. On its own it never lets locked apps open or
+shows HOME.
 
 Show notification content on the lock screen on a trusted network and hide it everywhere else.
 Unlike item 7, this covers the lock screen only, for every app.
