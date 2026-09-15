@@ -75,8 +75,13 @@
         android:theme="@style/Theme.AppLock"
         tools:targetApi="33">
 
+        <!--
+            Kept out of Recents, where its card would lead to App info. Android still lists the app
+            while it is on screen.
+        -->
         <activity
             android:name=".MainActivity"
+            android:excludeFromRecents="true"
             android:exported="true"
             android:theme="@style/Theme.AppLock">
             <intent-filter>
@@ -87,6 +92,7 @@
 
         <activity
             android:name=".features.lockscreen.ui.PasswordOverlayActivity"
+            android:autoRemoveFromRecents="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="false"
@@ -98,6 +104,7 @@
 
         <activity
             android:name=".features.lockscreen.ui.TransparentBiometricActivity"
+            android:autoRemoveFromRecents="true"
             android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleInstance" />
