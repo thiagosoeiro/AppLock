@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -871,7 +872,8 @@ fun SettingsScreen(
                         null
                     }
                 }
-                val versionName = packageInfo?.versionName ?: "Unknown"
+                val versionName = packageInfo?.versionName
+                    ?: stringResource(R.string.settings_screen_version_unknown)
                 Text(
                     text = stringResource(R.string.settings_screen_version_template, versionName),
                     style = MaterialTheme.typography.bodyMedium,
@@ -955,7 +957,7 @@ fun SettingsScreen(
                             icon = Timer,
                             title = stringResource(R.string.settings_screen_unlock_duration_title),
                             subtitle = if (unlockTimeDuration > 0) {
-                                if (unlockTimeDuration > 10_000) "Until screen off"
+                                if (unlockTimeDuration > 10_000) stringResource(R.string.settings_screen_unlock_duration_summary_until_screen_off)
                                 else stringResource(
                                     R.string.settings_screen_unlock_duration_summary_minutes,
                                     unlockTimeDuration
@@ -1437,7 +1439,10 @@ fun SettingsScreen(
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
                                     context.startActivity(
-                                        Intent.createChooser(shareIntent, "Share logs")
+                                        Intent.createChooser(
+                                            shareIntent,
+                                            context.getString(R.string.settings_screen_share_logs_chooser)
+                                        )
                                     )
                                 } else {
                                     Toast.makeText(
@@ -1450,8 +1455,8 @@ fun SettingsScreen(
                         ),
                         ToggleSettingItem(
                             icon = Icons.Default.Troubleshoot,
-                            title = "Logging",
-                            subtitle = "Enable debug logging for troubleshooting",
+                            title = stringResource(R.string.settings_screen_logging_title),
+                            subtitle = stringResource(R.string.settings_screen_logging_desc),
                             checked = loggingEnabled,
                             enabled = true,
                             onCheckedChange = { isChecked ->
@@ -1764,7 +1769,7 @@ fun UnlockTimeDurationDialog(
                                     duration
                                 )
                                 60 -> stringResource(R.string.settings_screen_unlock_duration_dialog_option_hour)
-                                Integer.MAX_VALUE -> "Until Screen Off"
+                                Integer.MAX_VALUE -> stringResource(R.string.settings_screen_unlock_duration_dialog_option_until_screen_off)
                                 else -> stringResource(
                                     R.string.settings_screen_unlock_duration_summary_minutes,
                                     duration
@@ -1886,7 +1891,7 @@ fun BackendSelectionItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = getBackendDisplayName(backend),
+                    text = stringResource(getBackendDisplayName(backend)),
                     style = MaterialTheme.typography.titleMedium,
                     color = if (isSelected) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurface
@@ -1907,7 +1912,7 @@ fun BackendSelectionItem(
         },
         supportingContent = {
             Text(
-                text = getBackendDescription(backend),
+                text = stringResource(getBackendDescription(backend)),
                 style = MaterialTheme.typography.bodySmall
             )
         },
@@ -1943,19 +1948,21 @@ fun BackendSelectionItem(
     )
 }
 
-private fun getBackendDisplayName(backend: BackendImplementation): String {
+@StringRes
+private fun getBackendDisplayName(backend: BackendImplementation): Int {
     return when (backend) {
-        BackendImplementation.ACCESSIBILITY -> "Accessibility Service"
-        BackendImplementation.USAGE_STATS -> "Usage Statistics"
-        BackendImplementation.SHIZUKU -> "Shizuku Service"
+        BackendImplementation.ACCESSIBILITY -> R.string.accessibility_service_title
+        BackendImplementation.USAGE_STATS -> R.string.settings_screen_backend_usage_stats_name
+        BackendImplementation.SHIZUKU -> R.string.shizuku_service_title
     }
 }
 
-private fun getBackendDescription(backend: BackendImplementation): String {
+@StringRes
+private fun getBackendDescription(backend: BackendImplementation): Int {
     return when (backend) {
-        BackendImplementation.ACCESSIBILITY -> "Standard method that works on most devices"
-        BackendImplementation.USAGE_STATS -> "Experimental method using app usage statistics"
-        BackendImplementation.SHIZUKU -> "Advanced method using Shizuku and internal APIs"
+        BackendImplementation.ACCESSIBILITY -> R.string.settings_screen_backend_accessibility_summary
+        BackendImplementation.USAGE_STATS -> R.string.settings_screen_backend_usage_stats_summary
+        BackendImplementation.SHIZUKU -> R.string.settings_screen_backend_shizuku_summary
     }
 }
 

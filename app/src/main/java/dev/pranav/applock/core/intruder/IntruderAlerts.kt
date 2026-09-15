@@ -2,6 +2,7 @@ package dev.pranav.applock.core.intruder
 
 import android.annotation.SuppressLint
 import android.content.Context
+import dev.pranav.applock.R
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.data.repository.IntruderCaptureMode
@@ -82,10 +83,14 @@ object IntruderAlerts {
         return try {
             runAlert(failureCount = null, lockedPackage = null)
             val error = context.appLockRepository().getIntruderSendError()
-            if (error == null) "Test alert sent" else "Couldn't send: $error"
+            if (error == null) context.getString(R.string.settings_screen_intruder_test_sent)
+            else context.getString(R.string.settings_screen_intruder_test_failed, error)
         } catch (e: Exception) {
             LogUtils.e(TAG, "Test alert failed", e)
-            "Couldn't send: ${e.message ?: e.javaClass.simpleName}"
+            context.getString(
+                R.string.settings_screen_intruder_test_failed,
+                e.message ?: e.javaClass.simpleName
+            )
         }
     }
 

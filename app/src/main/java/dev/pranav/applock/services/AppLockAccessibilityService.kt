@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.core.app.LocaleManagerCompat
 import androidx.core.content.getSystemService
 import androidx.core.os.LocaleListCompat
+import dev.pranav.applock.R
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.PhoneLocker
@@ -824,7 +825,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 performGlobalAction(GLOBAL_ACTION_HOME)
                 Toast.makeText(
                     this,
-                    "This action isn't allowed.",
+                    R.string.anti_uninstall_action_not_allowed_toast,
                     Toast.LENGTH_LONG
                 ).show()
                 Log.w(TAG, "Blocked device admin deactivation attempt.")
