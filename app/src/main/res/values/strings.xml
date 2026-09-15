@@ -473,4 +473,41 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="settings_screen_automation_regenerate">Replace</string>
     <string name="settings_screen_automation_regenerated">New token generated. Update your automation app.</string>
     <string name="settings_screen_automation_close">Done</string>
+
+    <!-- Text the screens used to spell out in code, moved here unchanged so it can be translated -->
+    <string name="main_screen_no_protected_apps_title">No Protected Apps</string>
+    <string name="main_screen_no_protected_apps_desc">Tap the + button to selectively secure your apps.</string>
+    <string name="main_screen_select_apps_title">Select Apps</string>
+    <string name="main_screen_protect_button">Protect (%1$d)</string>
+    <string name="main_screen_protected_label">Protected</string>
+    <string name="main_screen_unlock_app_cd">Unlock %1$s</string>
+    <string name="main_screen_unlock_app_fallback_name">app</string>
+    <string name="main_screen_warning_cd">Warning</string>
+    <string name="lock_screen_continue_to_app">Continue to %1$s</string>
+    <string name="lock_screen_close_cd">Close</string>
+    <string name="set_pattern_enter_current_title">Enter current Pattern</string>
+    <string name="set_pattern_confirm_title">Confirm pattern</string>
+    <string name="set_pattern_create_title">Create a pattern</string>
+    <string name="set_pattern_mismatch_error">Incorrect Pattern</string>
+    <string name="set_pattern_min_length_error">Patter length should be at least 4</string>
+    <string name="set_pattern_incorrect_error">Incorrect pattern</string>
+    <string name="settings_screen_version_unknown">Unknown</string>
+    <string name="settings_screen_unlock_duration_summary_until_screen_off">Until screen off</string>
+    <string name="settings_screen_unlock_duration_dialog_option_until_screen_off">Until Screen Off</string>
+    <string name="settings_screen_share_logs_chooser">Share logs</string>
+    <string name="settings_screen_logging_title">Logging</string>
+    <string name="settings_screen_logging_desc">Enable debug logging for troubleshooting</string>
+    <string name="settings_screen_backend_usage_stats_name">Usage Statistics</string>
+    <string name="settings_screen_backend_accessibility_summary">Standard method that works on most devices</string>
+    <string name="settings_screen_backend_usage_stats_summary">Experimental method using app usage statistics</string>
+    <string name="settings_screen_backend_shizuku_summary">Advanced method using Shizuku and internal APIs</string>
+    <string name="settings_screen_intruder_test_sent">Test alert sent</string>
+    <string name="settings_screen_intruder_test_failed">Couldn\'t send: %1$s</string>
+    <string name="usage_stats_permission_dialog_title">Grant Usage Stats Permission</string>
+    <string name="usage_stats_permission_dialog_text">You\'ve enabled Usage Stats mode, but the app requires Uage access permission to function properly.</string>
+    <string name="utils_battery_request_sent_toast">Battery optimization request sent</string>
+    <string name="utils_battery_open_failed_toast">Failed to open battery settings</string>
+    <string name="utils_battery_configure_manually_toast">Please find and configure this app in battery settings</string>
+    <!-- Disguise: shown over Settings, outside the PIN -->
+    <string name="anti_uninstall_action_not_allowed_toast">This action isn\'t allowed.</string>
 </resources>

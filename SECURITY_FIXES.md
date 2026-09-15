@@ -51,7 +51,9 @@ Merged in PR #5 as `1a77897`, after CI and the on-device checklist.
 - **F5** (`4541a14`). `BIOMETRIC_STRONG` only, in all three prompts and `canAuthenticateBiometrics`.
   On the S24 Ultra that means fingerprint only.
 - **F20** (`0855247`). `ownLabel` is a getter read on every check, so the guards follow a language
-  change without a reboot.
+  change without a reboot. Follow-up in `55a7e2c`, with the Brazilian Portuguese translation: once
+  the app can have its own language (Android 13+), the name the service reads can differ from the
+  one Settings shows, so `ownLabels` holds the name in both the app's and the phone's language.
 - **Differed from the plan.** A regression review found that the Settings Anti-Uninstall toggle read
   the flag once, which the F19 crash had hidden by restarting the app. `8aff4bd` makes
   `SettingsScreen` listen for changes to the flag, which also stops the toggle showing ON after

@@ -122,7 +122,7 @@ fun PatternLockScreen(
                         ) {
                             Text(
                                 text = if (!fromMainActivity && !lockedAppName.isNullOrEmpty())
-                                    "Continue to $lockedAppName"
+                                    stringResource(R.string.lock_screen_continue_to_app, lockedAppName)
                                 else
                                     stringResource(R.string.enter_pattern_to_continue),
                                 style = MaterialTheme.typography.titleMedium,
@@ -198,7 +198,7 @@ fun PatternLockScreen(
                     ) {
                         Text(
                             text = if (!fromMainActivity && !lockedAppName.isNullOrEmpty())
-                                "Continue to $lockedAppName"
+                                stringResource(R.string.lock_screen_continue_to_app, lockedAppName)
                             else
                                 stringResource(R.string.enter_pattern_to_continue),
                             style = MaterialTheme.typography.headlineMedium,
@@ -271,7 +271,7 @@ fun PatternLockScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
+                        contentDescription = stringResource(R.string.lock_screen_close_cd),
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }

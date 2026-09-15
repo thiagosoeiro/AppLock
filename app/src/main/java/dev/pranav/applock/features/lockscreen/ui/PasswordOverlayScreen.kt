@@ -390,7 +390,7 @@ fun PinPasswordOverlayScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
+                        contentDescription = stringResource(R.string.lock_screen_close_cd),
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -442,7 +442,7 @@ fun PinPasswordOverlayScreen(
                     ) {
                         Text(
                             text = if (!fromMainActivity && !lockedAppName.isNullOrEmpty())
-                                "Continue to $lockedAppName"
+                                stringResource(R.string.lock_screen_continue_to_app, lockedAppName)
                             else
                                 stringResource(R.string.enter_password_to_continue),
                             style = MaterialTheme.typography.titleLarge,
@@ -511,7 +511,7 @@ fun PinPasswordOverlayScreen(
 
                     Text(
                         text = if (!fromMainActivity && !lockedAppName.isNullOrEmpty())
-                            "Continue to $lockedAppName"
+                            stringResource(R.string.lock_screen_continue_to_app, lockedAppName)
                         else
                             stringResource(R.string.enter_password_to_continue),
                         style = if (!fromMainActivity && !lockedAppName.isNullOrEmpty())

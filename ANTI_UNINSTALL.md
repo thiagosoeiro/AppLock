@@ -9,7 +9,7 @@ removed or stopped.
 Outside the PIN screen the app presents itself as a system component, so a thief scanning the
 launcher or Settings has nothing obvious to remove:
 
-- **Name:** *System Services* (Arabic: *خدمات النظام*).
+- **Name:** *System Services* (Arabic: *خدمات النظام*; Brazilian Portuguese: *Serviços do sistema*).
 - **Icon:** a plain gear, matching themed icons on Android 13+.
 - **Notification:** the background-service notification reads *System Services / Running*, not
   "Protecting your apps".
@@ -28,6 +28,12 @@ Two things are deliberately left alone:
   unlocking, and the PIN pad itself carries no branding.
 - **The package name** `dev.pranav.applock` is unchanged, so the update installs over your existing
   app and keeps its settings and permissions. It shows only in advanced App info or over `adb`.
+
+**Language.** The name follows the phone's language, and on Android 13+ the app can also be given a
+language of its own (on One UI: **Settings → General management → App languages**). Settings, the
+launcher and the uninstall dialog keep showing the name in the phone's language, while the
+notification text and the lock screen follow the app's, so the guards below look for the name in
+both languages.
 
 ## Anti-uninstall
 
@@ -92,9 +98,10 @@ can't get past it.
   title a page differently and slip past. If a page isn't caught on your phone, enable
   **Settings → Advanced → Logging**, reproduce it, and export the security log — the class name and
   on-screen text in there are what the check needs.
-- **The disguise name is generic.** The App info bounce fires when it finds "System Services" on the
-  App info page — with the app's version, or in the page header next to an Uninstall button. If some
-  unrelated page happens to look like that, it could bounce you off it too.
+- **The disguise name is generic.** The App info bounce fires when it finds "System Services" (or
+  "Serviços do sistema") on the App info page — with the app's version, or in the page header next
+  to an Uninstall button. If some unrelated page happens to look like that, it could bounce you off
+  it too.
 - **Bounces can still lose to a very fast tap.** Each page is checked as it opens and for about a
   second while it finishes drawing. The locks above cover a tap that gets through first.
 - **The uninstall dialog check depends on the installer's screen names.** It only fires when the
