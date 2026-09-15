@@ -7,14 +7,18 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Handler
+import android.os.LocaleList
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
+import androidx.core.app.LocaleManagerCompat
 import androidx.core.content.getSystemService
+import androidx.core.os.LocaleListCompat
 import dev.pranav.applock.core.broadcast.DeviceAdmin
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.PhoneLocker
@@ -39,8 +43,19 @@ class AppLockAccessibilityService : AccessibilityService() {
     // Looked up on every check rather than cached: the label is translated, and a cached copy keeps
     // the old language's name after the phone's language changes, so every check would miss.
     // PackageManager caches the string itself and drops that cache on a configuration change.
-    private val ownLabel: String
-        get() = applicationInfo.loadLabel(packageManager).toString()
+    // Settings shows the name in the phone's language, but this service reads it in the app's
+    // language, and the two differ once the app is given its own language (Android 13+), so both
+    // count. When they agree this holds a single name.
+    private val ownLabels: List<String>
+        get() {
+            val appLanguageLabel = applicationInfo.loadLabel(packageManager).toString()
+            val phoneLanguageLabel = phoneLanguageLabel() ?: return listOf(appLanguageLabel)
+            return listOf(appLanguageLabel, phoneLanguageLabel).distinct()
+        }
+
+    // Our name in the phone's language and the phone locales it was read for; see [phoneLanguageLabel].
+    private var phoneLanguageLabelLocales: LocaleListCompat? = null
+    private var phoneLanguageLabelCache: String? = null
 
     // Our version as Settings prints it on the App info page. Lists of apps never show a version,
     // which is what separates that page from a list our name merely appears in.
@@ -485,6 +500,33 @@ class AppLockAccessibilityService : AccessibilityService() {
     //    }
     //}
 
+    /**
+     * Our name in the phone's language, the one Settings and the package installer show even when
+     * the app has a language of its own. Read again only when the phone's locales change. Null when
+     * it can't be read, which leaves the checks with the app-language name alone, as before.
+     */
+    private fun phoneLanguageLabel(): String? {
+        return try {
+            val labelRes = applicationInfo.labelRes
+            val locales = LocaleManagerCompat.getSystemLocales(this)
+            if (labelRes == 0 || locales.isEmpty) return null
+            if (locales != phoneLanguageLabelLocales) {
+                val configuration = Configuration(resources.configuration).apply {
+                    setLocales(LocaleList.forLanguageTags(locales.toLanguageTags()))
+                }
+                phoneLanguageLabelCache = createConfigurationContext(configuration).getString(labelRes)
+                phoneLanguageLabelLocales = locales
+            }
+            phoneLanguageLabelCache
+        } catch (e: Exception) {
+            logError("Could not read our name in the phone's language", e)
+            null
+        }
+    }
+
+    private fun CharSequence.containsAnyOf(names: List<String>, ignoreCase: Boolean = false): Boolean =
+        names.any { contains(it, ignoreCase) }
+
     // Settings holds our App info, Accessibility and device admin pages; the package installer holds
     // the uninstall dialog.
     private fun isGuardedPackage(packageName: CharSequence?): Boolean =
@@ -521,8 +563,8 @@ class AppLockAccessibilityService : AccessibilityService() {
         guardedPagePackage = packageName
         guardedPageClass = className
         guardedPageDescribed = false
-        val label = ownLabel
-        val showsOurName = event.text.any { it.contains(label) }
+        val labels = ownLabels
+        val showsOurName = event.text.any { it.containsAnyOf(labels) }
         if (packageName.contains(PACKAGE_INSTALLER_MARKER)) {
             val now = SystemClock.uptimeMillis()
             if (className.contains(PACKAGE_INSTALLER_MARKER)) {
@@ -595,14 +637,14 @@ class AppLockAccessibilityService : AccessibilityService() {
     private fun describePageShowingOurName(root: AccessibilityNodeInfo) {
         if (guardedPageDescribed || !appLockRepository.isLoggingEnabled()) return
 
-        val label = ownLabel
+        val labels = ownLabels
         val holdingOurName = mutableListOf<String>()
         val ids = sortedSetOf<String>()
 
         fun visit(node: AccessibilityNodeInfo) {
             val id = node.viewIdResourceName
             if (id != null) ids += id
-            if (node.text?.toString()?.contains(label, ignoreCase = true) == true) {
+            if (node.text?.containsAnyOf(labels, ignoreCase = true) == true) {
                 holdingOurName += "${id ?: "no id"} (${node.className})"
             }
             for (i in 0 until node.childCount) {
@@ -641,8 +683,8 @@ class AppLockAccessibilityService : AccessibilityService() {
         ) {
             return false
         }
-        val label = ownLabel
-        return event.text.any { it.contains(label) }
+        val labels = ownLabels
+        return event.text.any { it.containsAnyOf(labels) }
     }
 
     /**
@@ -689,7 +731,7 @@ class AppLockAccessibilityService : AccessibilityService() {
      * and greyed out by device admin regardless.
      */
     private fun isOwnAppInfoPage(root: AccessibilityNodeInfo): Boolean {
-        val label = ownLabel
+        val labels = ownLabels
         val version = ownVersionName
         var labelSeen = false
         var versionSeen = false
@@ -700,7 +742,7 @@ class AppLockAccessibilityService : AccessibilityService() {
             val id = node.viewIdResourceName
             val text = node.text?.toString()
             if (text != null) {
-                if (text.contains(label, ignoreCase = true)) {
+                if (text.containsAnyOf(labels, ignoreCase = true)) {
                     labelSeen = true
                     if (id?.contains(APP_INFO_HEADER_ID) == true) labelInHeader = true
                 }
@@ -766,7 +808,7 @@ class AppLockAccessibilityService : AccessibilityService() {
      * for "Device admin app", so it could never match.
      */
     private fun isOwnDeviceAdminPage(root: AccessibilityNodeInfo): Boolean =
-        findTexts(root, listOf(ownLabel)).isNotEmpty()
+        hasAnyText(root, ownLabels)
 
     @SuppressLint("InlinedApi")
     private fun blockDeviceAdminDeactivation() {
@@ -793,20 +835,19 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Which of [wanted] appear in the text of [root] or any node under it, ignoring case. One walk
-     * covers all of them and stops once every one has been seen, since reading nodes can mean calls
-     * into the other app's process.
+     * Whether any of [wanted] appears in the text of [root] or any node under it, ignoring case. The
+     * walk stops at the first match, since reading nodes can mean calls into the other app's process.
      */
-    private fun findTexts(root: AccessibilityNodeInfo, wanted: List<String>): Set<String> {
-        val found = mutableSetOf<String>()
+    private fun hasAnyText(root: AccessibilityNodeInfo, wanted: List<String>): Boolean {
+        var found = false
 
         fun visit(node: AccessibilityNodeInfo) {
-            val text = node.text?.toString()
-            if (text != null) {
-                wanted.filterTo(found) { text.contains(it, ignoreCase = true) }
+            if (node.text?.containsAnyOf(wanted, ignoreCase = true) == true) {
+                found = true
+                return
             }
             for (i in 0 until node.childCount) {
-                if (found.size == wanted.size) return
+                if (found) return
                 visit(node.getChild(i) ?: continue)
             }
         }
