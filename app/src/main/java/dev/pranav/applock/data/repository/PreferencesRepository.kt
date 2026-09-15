@@ -247,6 +247,36 @@ class PreferencesRepository(context: Context) {
         settingsPrefs.edit(commit = true) { putStringSet(KEY_TRUSTED_WIFI_SSIDS, updated) }
     }
 
+    fun setScreenTimeoutByNetworkEnabled(enabled: Boolean) {
+        settingsPrefs.edit(commit = true) { putBoolean(KEY_SCREEN_TIMEOUT_BY_NETWORK_ENABLED, enabled) }
+    }
+
+    fun isScreenTimeoutByNetworkEnabled(): Boolean {
+        return settingsPrefs.getBoolean(KEY_SCREEN_TIMEOUT_BY_NETWORK_ENABLED, false)
+    }
+
+    /** The screen timeout while on a trusted network, in seconds; one of [SCREEN_TIMEOUT_OPTIONS_SECONDS]. */
+    fun setScreenTimeoutTrustedSeconds(seconds: Int) {
+        if (seconds !in SCREEN_TIMEOUT_OPTIONS_SECONDS) return
+        settingsPrefs.edit { putInt(KEY_SCREEN_TIMEOUT_TRUSTED_SECONDS, seconds) }
+    }
+
+    fun getScreenTimeoutTrustedSeconds(): Int {
+        return settingsPrefs.getInt(KEY_SCREEN_TIMEOUT_TRUSTED_SECONDS, DEFAULT_SCREEN_TIMEOUT_TRUSTED_SECONDS)
+            .takeIf { it in SCREEN_TIMEOUT_OPTIONS_SECONDS } ?: DEFAULT_SCREEN_TIMEOUT_TRUSTED_SECONDS
+    }
+
+    /** The screen timeout everywhere else, in seconds; one of [SCREEN_TIMEOUT_OPTIONS_SECONDS]. */
+    fun setScreenTimeoutAwaySeconds(seconds: Int) {
+        if (seconds !in SCREEN_TIMEOUT_OPTIONS_SECONDS) return
+        settingsPrefs.edit { putInt(KEY_SCREEN_TIMEOUT_AWAY_SECONDS, seconds) }
+    }
+
+    fun getScreenTimeoutAwaySeconds(): Int {
+        return settingsPrefs.getInt(KEY_SCREEN_TIMEOUT_AWAY_SECONDS, DEFAULT_SCREEN_TIMEOUT_AWAY_SECONDS)
+            .takeIf { it in SCREEN_TIMEOUT_OPTIONS_SECONDS } ?: DEFAULT_SCREEN_TIMEOUT_AWAY_SECONDS
+    }
+
     fun setIntruderAlertsEnabled(enabled: Boolean) {
         settingsPrefs.edit(commit = true) { putBoolean(KEY_INTRUDER_ALERTS_ENABLED, enabled) }
     }
@@ -489,6 +519,9 @@ class PreferencesRepository(context: Context) {
         private const val KEY_PIN_LENGTH = "pin_length"
         private const val KEY_TRUSTED_WIFI_ENABLED = "trusted_wifi_enabled"
         private const val KEY_TRUSTED_WIFI_SSIDS = "trusted_wifi_ssids"
+        private const val KEY_SCREEN_TIMEOUT_BY_NETWORK_ENABLED = "screen_timeout_by_network_enabled"
+        private const val KEY_SCREEN_TIMEOUT_TRUSTED_SECONDS = "screen_timeout_trusted_seconds"
+        private const val KEY_SCREEN_TIMEOUT_AWAY_SECONDS = "screen_timeout_away_seconds"
         private const val KEY_INTRUDER_ALERTS_ENABLED = "intruder_alerts_enabled"
         private const val KEY_INTRUDER_CAPTURE_MODE = "intruder_capture_mode"
         private const val KEY_INTRUDER_THRESHOLD = "intruder_threshold"
@@ -510,6 +543,11 @@ class PreferencesRepository(context: Context) {
         private const val DEFAULT_TRUSTED_WIFI_ENABLED = false
         private const val DEFAULT_UNLOCK_DURATION = 0
         private const val DEFAULT_INTRUDER_THRESHOLD = 3
+        private const val DEFAULT_SCREEN_TIMEOUT_TRUSTED_SECONDS = 30
+        private const val DEFAULT_SCREEN_TIMEOUT_AWAY_SECONDS = 15
+
+        /** The screen timeouts on offer, in seconds: One UI's own list, 15 seconds to 10 minutes. */
+        val SCREEN_TIMEOUT_OPTIONS_SECONDS = listOf(15, 30, 60, 120, 300, 600)
 
         /** Resend's shared sender, usable without a verified domain but only to the account's address. */
         const val DEFAULT_INTRUDER_EMAIL_FROM = "onboarding@resend.dev"

@@ -108,7 +108,8 @@ holding an unlocked phone with USB debugging on.
 
 For the most common condition no automation app is needed. **Settings → Trusted Wi-Fi** lets locked
 apps open without authentication while the phone is connected to a network you trust, and keeps
-them locked everywhere else.
+them locked everywhere else. The same networks can also
+[set the screen timeout](#screen-timeout-by-network).
 
 ### Setup
 
@@ -152,3 +153,38 @@ trusted network or not. `QUERY_PROTECTION_STATE` and `PROTECTION_STATE` report t
   screen-on check doesn't catch this, because the phone really is still connected. Walking on ends
   it once the Wi-Fi drops; staying within range, say just outside or in a building's shared areas,
   keeps it going.
+
+### Screen timeout by network
+
+**Settings → Trusted Wi-Fi → Screen timeout by network** gives the phone a longer screen timeout on
+a trusted network and a shorter one everywhere else, so a phone taken while unlocked away from home
+locks sooner. The defaults are 30 seconds on trusted Wi-Fi and 15 seconds elsewhere. **Timeout on
+trusted Wi-Fi** and **Timeout elsewhere** change them.
+
+It has its own switch and uses the same trusted networks, so it works with or without **Open locked
+apps on trusted Wi-Fi**. On its own it never lets locked apps open, and the shield doesn't show
+**HOME**.
+
+1. Turn on **Screen timeout by network**. Android asks for **Modify system settings** on its own
+   page: turn on the switch there and come back. Then allow location as for trusted Wi-Fi.
+2. Add your networks under **Trusted networks**, if they aren't there already.
+
+If anti-uninstall bounces you off the Modify system settings page, turn anti-uninstall off while you
+allow it, then back on. The permission stays through app updates.
+
+The app writes the timeout:
+
+- when the phone joins or leaves a trusted network, including the screen-on check above;
+- when the app starts, and when you open its Settings screen;
+- when you change either timeout;
+- when you turn the option off, which leaves the shorter timeout in place.
+
+It fails closed like trusted Wi-Fi. Android keeps the timeout after the app stops, but trust isn't
+stored, so each start writes the shorter one until Android reports a trusted network. Anything that
+counts as untrusted above gets the shorter timeout.
+
+Limits:
+
+- A timeout you set by hand in the phone's settings is replaced at the next of those writes.
+- The one-bar case above keeps the longer timeout until the Wi-Fi disconnects.
+- Without Modify system settings nothing is written, and the option's description says so.
