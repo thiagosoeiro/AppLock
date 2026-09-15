@@ -74,7 +74,7 @@ fun Context.enableAccessibilityServiceWithShizuku(serviceComponentName: Componen
     }
 }
 
-private fun exec(vararg command: String): List<String> {
+internal fun exec(vararg command: String): List<String> {
     val output = mutableListOf<String>()
     if (Shizuku.pingBinder()) {
         Log.i("ShizukuPermissionHandler", "Shizuku is running")
