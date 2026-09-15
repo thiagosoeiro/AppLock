@@ -29,13 +29,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Tracks whether the phone is on a trusted Wi-Fi network. It runs while either option that follows
+ * Tracks whether the phone is on a trusted Wi-Fi network. It runs while any option that follows
  * trust is on:
  *  - "Open locked apps on trusted Wi-Fi" lets the lock backends open locked apps there without
  *    authentication (see `AppLockRepository.isProtectionActive`);
- *  - "Screen timeout by network" sets the longer screen timeout there, see [ScreenTimeoutByNetwork].
+ *  - "Screen timeout by network" sets the longer screen timeout there, see [ScreenTimeoutByNetwork];
+ *  - "Notification content by network" shows notification content on the lock screen there, see
+ *    [LockScreenContentByNetwork].
  *
- * Fails closed throughout, since trust switches locking off and lengthens the screen timeout:
+ * Fails closed throughout, since trust switches locking off, lengthens the screen timeout and shows
+ * notification content on the lock screen:
  *  - trust lives only in memory, so after a reboot or restart apps stay locked until Android
  *    reports a trusted network;
  *  - a network whose name can't be read - Location off, location access missing or limited to
@@ -89,9 +92,9 @@ object TrustedNetworkMonitor {
     fun isOnTrustedNetwork(): Boolean = _state.value.trusted
 
     /**
-     * Starts or stops monitoring to match the options, then re-evaluates trust and writes the screen
-     * timeout for it. Call it whenever an option, the trusted networks, the chosen timeouts or
-     * location access may have changed.
+     * Starts or stops monitoring to match the options, then re-evaluates trust and writes the phone
+     * settings that follow it. Call it whenever an option, the trusted networks, the chosen timeouts
+     * or location access may have changed.
      */
     @Synchronized
     fun refresh(context: Context) {
@@ -116,11 +119,12 @@ object TrustedNetworkMonitor {
             registerNetworkCallback(app)
         }
         recompute(app)
-        // "Open locked apps" may have been switched while the screen timeout kept this running.
+        // "Open locked apps" may have been switched while another option kept this running.
         updateRelaxing(app)
-        // Android keeps the screen timeout through a restart while trust starts out false, so at app
-        // start this writes the shorter one. Holding this lock, it can't undo a newer trust change.
-        ScreenTimeoutByNetwork.apply(app, _state.value.trusted)
+        // Android keeps these settings through a restart while trust starts out false, so at app
+        // start this hides notification content and writes the shorter timeout. Holding this lock,
+        // it can't undo a newer trust change.
+        applyTrustSettings(app, _state.value.trusted)
     }
 
     /** The name to show for [ssid]. Android quotes names that are valid UTF-8. */
@@ -392,9 +396,18 @@ object TrustedNetworkMonitor {
         _state.value = newState
         if (newState.trusted != wasTrusted) {
             LogUtils.d(TAG, if (newState.trusted) "On a trusted network" else "Not on a trusted network")
-            ScreenTimeoutByNetwork.apply(context, newState.trusted)
+            applyTrustSettings(context, newState.trusted)
         }
         updateRelaxing(context)
+    }
+
+    /**
+     * Writes the phone settings that follow trust; each does nothing while its option is off.
+     * Notification content goes first, since it is what shows on the lock screen.
+     */
+    private fun applyTrustSettings(context: Context, trusted: Boolean) {
+        LockScreenContentByNetwork.apply(context, trusted)
+        ScreenTimeoutByNetwork.apply(context, trusted)
     }
 
     /**
