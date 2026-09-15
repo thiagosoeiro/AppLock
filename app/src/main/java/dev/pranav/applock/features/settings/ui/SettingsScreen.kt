@@ -56,6 +56,7 @@ import dev.pranav.applock.core.intruder.IntruderCapture
 import dev.pranav.applock.core.intruder.IntruderLocation
 import dev.pranav.applock.core.intruder.IntruderSendJob
 import dev.pranav.applock.core.navigation.Screen
+import dev.pranav.applock.core.network.LockScreenContentByNetwork
 import dev.pranav.applock.core.network.ScreenTimeoutByNetwork
 import dev.pranav.applock.core.network.TrustedNetworkMonitor
 import dev.pranav.applock.core.remotelock.RemoteLock
@@ -72,14 +73,24 @@ import dev.pranav.applock.data.repository.BackendImplementation
 import dev.pranav.applock.data.repository.IntruderCaptureMode
 import dev.pranav.applock.data.repository.PreferencesRepository
 import dev.pranav.applock.features.admin.AdminDisableActivity
+import dev.pranav.applock.features.antiuninstall.ui.ShizukuState
+import dev.pranav.applock.features.antiuninstall.ui.checkShizukuState
 import dev.pranav.applock.services.AppLockAccessibilityService
 import dev.pranav.applock.services.ShizukuAppLockService
 import dev.pranav.applock.services.UsageLockService
 import dev.pranav.applock.ui.icons.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
 import kotlin.math.abs
+
+/** The trusted Wi-Fi options that ask for location access, so the grant turns on the one that asked. */
+private enum class TrustedWifiOption { OPEN_APPS, SCREEN_TIMEOUT, LOCK_SCREEN_CONTENT }
+
+/** Shizuku's own permission, when it's asked for in order to grant secure settings. */
+private const val SHIZUKU_GRANT_REQUEST_CODE = 424
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -139,8 +150,13 @@ fun SettingsScreen(
     var showScreenTimeoutTrustedDialog by remember { mutableStateOf(false) }
     var showScreenTimeoutAwayDialog by remember { mutableStateOf(false) }
     var pendingEnableScreenTimeout by remember { mutableStateOf(false) }
+    var lockScreenContentEnabled by remember { mutableStateOf(appLockRepository.isLockScreenContentByNetworkEnabled()) }
+    var canWriteSecureSettings by remember { mutableStateOf(LockScreenContentByNetwork.canWrite(context)) }
+    var showSecureSettingsDialog by remember { mutableStateOf(false) }
+    // Set while Shizuku asks for its own permission, so its answer carries on the grant.
+    var pendingShizukuGrant by remember { mutableStateOf(false) }
     // Which trusted Wi-Fi option asked for location access, so the grant turns that one on.
-    var locationRequestForScreenTimeout by remember { mutableStateOf(false) }
+    var locationRequestFor by remember { mutableStateOf(TrustedWifiOption.OPEN_APPS) }
 
     var intruderAlertsEnabled by remember { mutableStateOf(appLockRepository.isIntruderAlertsEnabled()) }
     var intruderCaptureMode by remember { mutableStateOf(appLockRepository.getIntruderCaptureMode()) }
@@ -191,7 +207,9 @@ fun SettingsScreen(
                 hasLocationAccess = TrustedNetworkMonitor.hasLocationPermission(context) &&
                         TrustedNetworkMonitor.hasBackgroundLocationPermission(context)
                 locationEnabled = TrustedNetworkMonitor.isLocationEnabled(context)
-                if (trustedWifiEnabled || screenTimeoutEnabled) TrustedNetworkMonitor.refresh(context)
+                // The secure settings grant can also be made or taken away from a computer.
+                canWriteSecureSettings = LockScreenContentByNetwork.canWrite(context)
+                if (appLockRepository.usesTrustedNetworks()) TrustedNetworkMonitor.refresh(context)
                 // An alert can fail while this screen is away, so pick the reason up on return.
                 intruderSendError = appLockRepository.getIntruderSendError()
                 // SMS and notification access are granted in Android's settings, and the ways to
@@ -230,10 +248,31 @@ fun SettingsScreen(
         TrustedNetworkMonitor.refresh(context)
     }
 
-    // Turns on whichever trusted Wi-Fi option asked for location access. The screen timeout checks
-    // "Modify system settings" before it asks.
+    fun enableLockScreenContent() {
+        appLockRepository.setLockScreenContentByNetworkEnabled(true)
+        lockScreenContentEnabled = true
+        hasLocationAccess = true
+        // Also shows or hides content for the network the phone is on now.
+        TrustedNetworkMonitor.refresh(context)
+        if (trustedWifiSsids.isEmpty()) showTrustedNetworksDialog = true
+    }
+
+    fun disableLockScreenContent() {
+        appLockRepository.setLockScreenContentByNetworkEnabled(false)
+        lockScreenContentEnabled = false
+        // Android keeps whatever was written last, so leave content hidden.
+        LockScreenContentByNetwork.applyHidden(context)
+        TrustedNetworkMonitor.refresh(context)
+    }
+
+    // Turns on whichever trusted Wi-Fi option asked for location access. The screen timeout and
+    // notification content check their own permission before they ask.
     fun onLocationAccessGranted() {
-        if (locationRequestForScreenTimeout) enableScreenTimeout() else enableTrustedWifi()
+        when (locationRequestFor) {
+            TrustedWifiOption.OPEN_APPS -> enableTrustedWifi()
+            TrustedWifiOption.SCREEN_TIMEOUT -> enableScreenTimeout()
+            TrustedWifiOption.LOCK_SCREEN_CONTENT -> enableLockScreenContent()
+        }
     }
 
     val backgroundLocationLauncher = rememberLauncherForActivityResult(
@@ -274,8 +313,8 @@ fun SettingsScreen(
     }
 
     // Asks for whichever location access is still missing, for one of the trusted Wi-Fi options.
-    fun requestLocationAccess(forScreenTimeout: Boolean) {
-        locationRequestForScreenTimeout = forScreenTimeout
+    fun requestLocationAccess(option: TrustedWifiOption) {
+        locationRequestFor = option
         when {
             !TrustedNetworkMonitor.hasLocationPermission(context) -> {
                 locationPermissionLauncher.launch(
@@ -300,9 +339,66 @@ fun SettingsScreen(
 
             !TrustedNetworkMonitor.hasLocationPermission(context) ||
                     !TrustedNetworkMonitor.hasBackgroundLocationPermission(context) ->
-                requestLocationAccess(forScreenTimeout = true)
+                requestLocationAccess(TrustedWifiOption.SCREEN_TIMEOUT)
 
             else -> enableScreenTimeout()
+        }
+    }
+
+    // Turns notification content by network on once secure settings can be written and the network
+    // name can be read, asking for whichever is still missing.
+    fun tryEnableLockScreenContent() {
+        when {
+            !LockScreenContentByNetwork.canWrite(context) -> showSecureSettingsDialog = true
+
+            !TrustedNetworkMonitor.hasLocationPermission(context) ||
+                    !TrustedNetworkMonitor.hasBackgroundLocationPermission(context) ->
+                requestLocationAccess(TrustedWifiOption.LOCK_SCREEN_CONTENT)
+
+            else -> enableLockScreenContent()
+        }
+    }
+
+    // However the permission was granted, close the grant dialog and carry on turning the option on.
+    fun onSecureSettingsGranted() {
+        canWriteSecureSettings = true
+        showSecureSettingsDialog = false
+        tryEnableLockScreenContent()
+    }
+
+    fun grantSecureSettingsWithShizuku() {
+        coroutineScope.launch {
+            val granted = withContext(Dispatchers.IO) {
+                LockScreenContentByNetwork.grantWithShizuku(context)
+            }
+            if (granted) {
+                onSecureSettingsGranted()
+            } else {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.settings_screen_lock_screen_content_shizuku_failed),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    // Runs the grant when Shizuku is ready. When this app isn't allowed in Shizuku yet, Shizuku asks
+    // first, and the listener below carries on once the user answers.
+    fun onGrantWithShizukuClick() {
+        when (checkShizukuState(context)) {
+            ShizukuState.READY -> grantSecureSettingsWithShizuku()
+
+            ShizukuState.PERMISSION_DENIED -> {
+                pendingShizukuGrant = true
+                Shizuku.requestPermission(SHIZUKU_GRANT_REQUEST_CODE)
+            }
+
+            else -> Toast.makeText(
+                context,
+                context.getString(R.string.settings_screen_shizuku_not_running_toast),
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -327,6 +423,27 @@ fun SettingsScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Shizuku asks for its own permission in a dialog of its own, so carry on the grant once the
+    // user answers there.
+    DisposableEffect(Unit) {
+        val listener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == SHIZUKU_GRANT_REQUEST_CODE && pendingShizukuGrant) {
+                pendingShizukuGrant = false
+                if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                    grantSecureSettingsWithShizuku()
+                } else {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.settings_screen_shizuku_permission_required_desc),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+        Shizuku.addRequestPermissionResultListener(listener)
+        onDispose { Shizuku.removeRequestPermissionResultListener(listener) }
     }
 
     val intruderLocationPermissionLauncher = rememberLauncherForActivityResult(
@@ -593,6 +710,36 @@ fun SettingsScreen(
                 }
             },
             containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showSecureSettingsDialog) {
+        SecureSettingsGrantDialog(
+            adbCommand = LockScreenContentByNetwork.adbGrantCommand(context),
+            onGrantWithShizuku = { onGrantWithShizukuClick() },
+            onCopyCommand = {
+                copyCommandToClipboard(context, LockScreenContentByNetwork.adbGrantCommand(context))
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.settings_screen_lock_screen_content_command_copied),
+                    Toast.LENGTH_SHORT
+                ).show()
+            },
+            onCheckAgain = {
+                if (LockScreenContentByNetwork.canWrite(context)) {
+                    onSecureSettingsGranted()
+                } else {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.settings_screen_lock_screen_content_not_granted),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            },
+            onDismiss = {
+                showSecureSettingsDialog = false
+                pendingShizukuGrant = false
+            }
         )
     }
 
@@ -1097,7 +1244,7 @@ fun SettingsScreen(
 
                                     !TrustedNetworkMonitor.hasLocationPermission(context) ||
                                             !TrustedNetworkMonitor.hasBackgroundLocationPermission(context) ->
-                                        requestLocationAccess(forScreenTimeout = false)
+                                        requestLocationAccess(TrustedWifiOption.OPEN_APPS)
 
                                     else -> enableTrustedWifi()
                                 }
@@ -1150,10 +1297,30 @@ fun SettingsScreen(
                             subtitle = screenTimeoutLabel(context, screenTimeoutAwaySeconds),
                             onClick = { showScreenTimeoutAwayDialog = true }
                         ),
+                        ToggleSettingItem(
+                            icon = Icons.Default.Notifications,
+                            title = stringResource(R.string.settings_screen_lock_screen_content_control_title),
+                            subtitle = stringResource(
+                                when {
+                                    !lockScreenContentEnabled -> R.string.settings_screen_lock_screen_content_desc_off
+                                    !canWriteSecureSettings -> R.string.settings_screen_lock_screen_content_desc_needs_grant
+                                    !hasLocationAccess -> R.string.settings_screen_lock_screen_content_desc_needs_location
+                                    !locationEnabled -> R.string.settings_screen_lock_screen_content_desc_location_off
+                                    trustedWifiSsids.isEmpty() -> R.string.settings_screen_trusted_wifi_desc_no_networks
+                                    trustedNetworkState.trusted -> R.string.settings_screen_lock_screen_content_desc_trusted
+                                    else -> R.string.settings_screen_lock_screen_content_desc_not_trusted
+                                }
+                            ),
+                            checked = lockScreenContentEnabled,
+                            enabled = true,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked) tryEnableLockScreenContent() else disableLockScreenContent()
+                            }
+                        ),
                         ActionSettingItem(
                             icon = Icons.Default.Router,
                             title = stringResource(R.string.settings_screen_trusted_networks_title),
-                            subtitle = if (trustedWifiEnabled || screenTimeoutEnabled)
+                            subtitle = if (trustedWifiEnabled || screenTimeoutEnabled || lockScreenContentEnabled)
                                 context.resources.getQuantityString(
                                     R.plurals.settings_screen_trusted_networks_count,
                                     trustedWifiSsids.size,
@@ -1162,7 +1329,7 @@ fun SettingsScreen(
                             else
                                 stringResource(R.string.settings_screen_trusted_networks_desc_disabled),
                             onClick = {
-                                if (!trustedWifiEnabled && !screenTimeoutEnabled) {
+                                if (!trustedWifiEnabled && !screenTimeoutEnabled && !lockScreenContentEnabled) {
                                     Toast.makeText(
                                         context,
                                         context.getString(R.string.settings_screen_trusted_networks_desc_disabled),
@@ -2173,6 +2340,63 @@ private fun screenTimeoutLabel(context: Context, seconds: Int): String =
             seconds / 60
         )
     }
+
+@Composable
+fun SecureSettingsGrantDialog(
+    adbCommand: String,
+    onGrantWithShizuku: () -> Unit,
+    onCopyCommand: () -> Unit,
+    onCheckAgain: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_screen_lock_screen_content_grant_dialog_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_screen_lock_screen_content_grant_dialog_text),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                FilledTonalButton(
+                    onClick = onGrantWithShizuku,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.settings_screen_lock_screen_content_grant_shizuku))
+                }
+                Text(
+                    text = stringResource(R.string.settings_screen_lock_screen_content_grant_adb),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                MonospaceBlock(adbCommand)
+                TextButton(onClick = onCopyCommand) {
+                    Text(stringResource(R.string.settings_screen_lock_screen_content_copy_command))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onCheckAgain) {
+                Text(stringResource(R.string.settings_screen_lock_screen_content_check_again))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel_button))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+/** Copies the adb grant command. It holds nothing secret, so unlike the token it isn't flagged sensitive. */
+private fun copyCommandToClipboard(context: Context, command: String) {
+    val clipboard =
+        context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("adb command", command))
+}
 
 @Composable
 fun IntruderEmailDialog(
