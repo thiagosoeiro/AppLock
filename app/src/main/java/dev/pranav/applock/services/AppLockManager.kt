@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.services.AppLockAccessibilityService.BiometricState
 import java.util.concurrent.ConcurrentHashMap
@@ -244,6 +245,7 @@ object AppLockManager {
     fun unlockApp(packageName: String) {
         temporarilyUnlockedApp = packageName
         appUnlockTimes[packageName] = System.currentTimeMillis()
+        if (packageName == interruptedPromptPackage) clearBiometricPromptInterruptions()
         LogUtils.d(
             TAG,
             "App $packageName unlocked at timestamp: ${appUnlockTimes[packageName]}, current time: ${System.currentTimeMillis()}"
@@ -261,6 +263,54 @@ object AppLockManager {
 
     fun reportBiometricAuthFinished() {
         currentBiometricState = BiometricState.IDLE
+    }
+
+    /**
+     * Interruptions of the same app's biometric prompt count as a run while each comes within this
+     * long of the last; see [shouldAutoPromptBiometrics].
+     */
+    private const val PROMPT_INTERRUPTION_WINDOW_MS = 10_000L
+
+    /** How many interruptions in a run before the lock screen stops raising the prompt itself. */
+    private const val PROMPT_INTERRUPTIONS_BEFORE_WAITING = 2
+
+    private var interruptedPromptPackage: String = ""
+    private var interruptedPromptCount = 0
+    private var lastPromptInterruptionAt = 0L
+
+    /**
+     * Records that the biometric prompt for [packageName] left the screen without an answer, such
+     * as when the app opened another screen over it.
+     */
+    fun recordBiometricPromptInterrupted(packageName: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (packageName == interruptedPromptPackage &&
+            now - lastPromptInterruptionAt <= PROMPT_INTERRUPTION_WINDOW_MS
+        ) {
+            interruptedPromptCount++
+        } else {
+            interruptedPromptPackage = packageName
+            interruptedPromptCount = 1
+        }
+        lastPromptInterruptionAt = now
+        LogUtils.d(TAG, "Biometric prompt for $packageName interrupted ($interruptedPromptCount in a row)")
+    }
+
+    /**
+     * Whether a new lock screen for [packageName] should raise the biometric prompt by itself.
+     * The lock screen that replaces an interrupted prompt tries it once more; if that one is
+     * interrupted too, the next waits for a tap on the fingerprint icon or the PIN, so an app
+     * that keeps covering the prompt cannot loop it.
+     */
+    fun shouldAutoPromptBiometrics(packageName: String): Boolean =
+        packageName != interruptedPromptPackage ||
+                SystemClock.elapsedRealtime() - lastPromptInterruptionAt > PROMPT_INTERRUPTION_WINDOW_MS ||
+                interruptedPromptCount < PROMPT_INTERRUPTIONS_BEFORE_WAITING
+
+    fun clearBiometricPromptInterruptions() {
+        interruptedPromptPackage = ""
+        interruptedPromptCount = 0
+        lastPromptInterruptionAt = 0L
     }
 
     fun isAppTemporarilyUnlocked(packageName: String): Boolean =

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Handler
 import android.os.LocaleList
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -144,6 +145,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                     LogUtils.d(TAG, "Screen off detected. Resetting AppLock state.")
                     AppLockManager.isLockScreenShown.set(false)
                     AppLockManager.clearAllUnlockStates()
+                    AppLockManager.clearBiometricPromptInterruptions()
                 } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
                     // Unlocked: a guard matching from now on is a new attempt, not a repeat.
                     lastBlockAt = 0L
@@ -436,9 +438,16 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
 
         override fun onBiometricPromptUnanswered(lockedPackage: String, triggeringPackage: String) {
+            // With the screen off there is nothing on it to lock, and screen-off resets the rest.
+            if (!isScreenInteractive()) return
             // With the flag cleared, the app's next event locks it again.
+            AppLockManager.recordBiometricPromptInterrupted(lockedPackage)
         }
     }
+
+    // Unknown counts as on, so a failed lookup errs towards locking.
+    private fun isScreenInteractive(): Boolean =
+        getSystemService(PowerManager::class.java)?.isInteractive != false
 
     private fun showLockScreenOverlay(
         packageName: String,
@@ -474,8 +483,15 @@ class AppLockAccessibilityService : AccessibilityService() {
             // The overlay is up first and stays up until the prompt is on screen, so the locked
             // app is never briefly visible behind it.
             if (autoPromptBiometrics && canPromptBiometrics()) {
-                LogUtils.d(TAG, "Auto-prompting biometrics for: $packageName")
-                startBiometricPrompt(packageName, triggeringPackage)
+                if (AppLockManager.shouldAutoPromptBiometrics(packageName)) {
+                    LogUtils.d(TAG, "Auto-prompting biometrics for: $packageName")
+                    startBiometricPrompt(packageName, triggeringPackage)
+                } else {
+                    LogUtils.d(
+                        TAG,
+                        "Lock screen for $packageName waits for a tap: its prompt was interrupted twice"
+                    )
+                }
             }
         }
     }
