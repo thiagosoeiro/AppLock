@@ -3,6 +3,8 @@ package dev.pranav.applock.features.lockscreen.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
+import android.os.Build
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.OnBackPressedDispatcherOwner
@@ -207,6 +209,19 @@ class LockScreenOverlayManager(private val context: Context):
 
         composeView?.isFocusableInTouchMode = true
         composeView?.requestFocus()
+
+        // Back, including the back gesture, reaches this window as a key that nothing in the lock
+        // screen handles, and no activity is there to pass it to BackHandler. Pass it on here, so
+        // Back closes the lock screen like its close button.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            composeView?.addOnUnhandledKeyEventListener { _, event ->
+                if (event.keyCode != KeyEvent.KEYCODE_BACK) return@addOnUnhandledKeyEventListener false
+                if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                    onBackPressedDispatcher.onBackPressed()
+                }
+                true
+            }
+        }
 
         //// Block Back Button
         //composeView?.setOnKeyListener { _, keyCode, event ->
