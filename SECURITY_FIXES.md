@@ -241,12 +241,21 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   - Cancelling the prompt brought the lock screen back without prompting.
   - Not reached: Home, Recents or screen off on the prompt, and the two-interruption limit.
   - Found: One UI draws the fingerprint prompt from its own package, which wasn't excluded. An app
-    with its own fingerprint lock looped seven of our prompts in 18 s, since its prompt counted as
-    leaving the app, and the check after an unanswered prompt looked at the prompt itself. The
-    same code runs without this PR, so the loop wasn't caused by it.
+    inside Secure Folder looped seven of our prompts in 18 s: a fingerprint prompt over it, taken
+    at the time for the app's own lock but more likely Secure Folder's, counted as leaving the
+    app, and the check after an unanswered prompt looked at the prompt itself. The same code runs
+    without this PR, so the loop wasn't caused by it.
 - **Changed after the test** (`a4a580b`): `com.samsung.android.biometrics.app.setting` is excluded
   like System UI.
-- **Second phone test:** pending.
+- **Second phone test** (2026-09-16, same phone): unlocks outside Secure Folder were clean, and the
+  fingerprint prompt no longer counted as leaving. An app inside Secure Folder still locked again
+  five times in 25 s: after each unlock, a Secure Folder window, sometimes 40 ms later, counted as
+  switching to another app. Home, Recents, screen off and the limit were still not reached.
+- **Changed after the second test** (`e6851f3`): Secure Folder counts as a neutral surface, like the
+  launcher, so leaving an unlocked app for it holds the unlock for the 5 s return window. It is not
+  excluded, so it still locks if it is in the list. The switch log line names the window class and
+  event type.
+- **Third phone test:** pending.
 
 ## Testing chunks 2 and 3
 
