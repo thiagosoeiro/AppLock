@@ -2,8 +2,10 @@ package dev.pranav.applock.features.applist.ui
 
 import android.app.Application
 import android.content.pm.ApplicationInfo
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.data.repository.AppLockRepository
 import dev.pranav.applock.features.applist.domain.AppSearchManager
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +18,8 @@ import kotlinx.coroutines.withContext
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val appSearchManager = AppSearchManager(application)
     private val appLockRepository = AppLockRepository(application)
+
+    private val createdAt = SystemClock.elapsedRealtime()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -78,6 +82,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     appSearchManager.loadApps(true)
                 }
                 _allApps.value = apps
+                logReadyTimes(apps)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _allApps.value = emptySet()
@@ -100,4 +105,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         appLockRepository.removeLockedApp(packageName)
         _lockedApps.value = appLockRepository.getLockedApps()
     }
+
+    /**
+     * Times the two waits the main screen has, counted from this view model being created: the
+     * protected apps appearing, and the full list behind the "+" button being ready. Written only
+     * while Settings → Logging is on, and read from Settings → Export audit logs.
+     */
+    private fun logReadyTimes(apps: Set<ApplicationInfo>) {
+        val elapsed = SystemClock.elapsedRealtime() - createdAt
+        val locked = apps.count { it.packageName in _lockedApps.value }
+        LogUtils.d(TAG, "Protected apps ready in $elapsed ms ($locked apps)")
+        LogUtils.d(TAG, "Full app list ready in $elapsed ms (${apps.size} packages)")
+    }
 }
+
+private const val TAG = "MainViewModel"
