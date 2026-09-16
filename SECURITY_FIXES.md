@@ -273,12 +273,17 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   - Home on the prompt: the lock screen came back over the home screen. One UI reported the cancel
     as the user's while the activity was still in front, so it was handled like Back.
   - The two-interruption limit was not reached.
-- **Changed after the fourth test** (`fcc9c8b`): a cancel that arrives while the prompt's activity is still in
-  front waits up to 1 s for a sign of what happened. If window focus comes back, the user dismissed
-  the prompt and the lock screen returns as before. If the activity is paused, it is leaving the
-  screen and is released as unanswered, so nothing is left over the home screen. With no sign in
-  that time, the lock screen returns. "Use PIN" and lockouts still return to the lock screen at
-  once. The log names which way each cancel went.
+- **Changed after the fourth test** (`fcc9c8b`): a cancel that arrived while the prompt's activity
+  was still in front waited up to 1 s, returning to the lock screen once window focus came back and
+  releasing the prompt if the activity was paused first.
+- **Fifth phone test** (2026-09-16, same phone): it didn't work. Of 16 cancels, only two were
+  released; the other 14 went back to the lock screen. One UI hands the activity its focus back about
+  20 ms after a cancel, while leaving for Home stops the activity only about 0.9 s later.
+- **Changed after the fifth test** (`1e782be`): a cancel returns to the lock screen at once again,
+  and the prompt's activity stays under it for up to 3 s. If the activity is stopped in that time,
+  by Home, Recents, another app or the screen going off, the lock screen is taken down and the
+  prompt counts as one that went away unanswered. After Back the activity isn't stopped, so the lock
+  screen stays. The watch ends early once the lock screen is unlocked or closed.
 
 ## Testing chunks 2 and 3
 
