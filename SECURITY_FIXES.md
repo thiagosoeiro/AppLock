@@ -292,6 +292,14 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   - Power button: both times the screen went off, a cancel had already put the lock screen back
     3–17 s earlier, so it stayed over the phone's own lock screen. That is the older screen-off
     behaviour, not the prompt.
+- **Changed after the sixth test**, two older behaviours, each in its own commit:
+  - `f794f05`: screen-off cleared the lock state but left the lock screen up. It is now taken down
+    at screen off, or at screen on if the phone locked later, but only while the phone's secure
+    lock is on. The app locks again from its own events once the phone is unlocked. With a lock
+    delay or no secure lock, the lock screen stays up as before, since nothing else covers the app.
+  - `442a865`: Back and the back gesture did nothing on the lock screen. The key reached its window
+    unhandled, because the lock screen's back handler only hears from an activity. The window now
+    passes Back on, so it closes the lock screen like the close button (Android 9 and later).
 
 ## Testing chunks 2 and 3
 
