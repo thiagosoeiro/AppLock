@@ -1,13 +1,13 @@
 # Security fixes
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
-before merging, a fourth after anti-uninstall was beaten on the phone, and a fifth after locked apps
-opened freely on the phone. The audit's findings table records the status of every finding,
+before merging, a fourth after anti-uninstall was beaten on the phone, a fifth after locked apps
+opened freely on the phone, and a sixth after a notification brought up lock screens. The audit's findings table records the status of every finding,
 including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it. Chunk 5 fixes a bug found in use, not an audit finding.
+closing it. Chunks 5 and 6 fix bugs found in use, not audit findings.
 
 ## Status
 
@@ -18,6 +18,7 @@ closing it. Chunk 5 fixes a bug found in use, not an audit finding.
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
 | 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`cafddd4`) | 3 rounds | `9e2387c` |
 | 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
+| 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | — | — | — | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -315,6 +316,27 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   on. Expected: the phone's own lock screen with no app lock screen over it, and the app locks again
   once the phone is unlocked. With Logging on, the lock screen's window should be removed at
   "Screen off detected" with no "Left the lock screen" line before it.
+
+## Chunk 6 — Notification taken for an app switch (in progress)
+
+Not from the audit. On 2026-09-16 a lock screen came up over an unlocked app while it was in use,
+with nothing touched. It was the lock screen of a messaging app, and once that was unlocked the app
+in front locked again too. A test text reproduced it twice.
+
+- **Why it happened.** Both times the log read "Switched from unlocked app … to <messaging app>
+  (android.widget.FrameLayout, TYPE_WINDOW_CONTENT_CHANGED)", with no screen of that app opening.
+  System UI draws notifications, but Android builds a notification's views with the context of the
+  app that posted it (`RemoteViews`' context wrapper returns that app's package, and `View` stamps
+  it on its events). The service listens to every interactive window, so the notification looked
+  like switching to the messaging app: its lock screen came up, and the app in front lost its unlock.
+  Per the code, a notification from an app that isn't locked ended the unlock of the app in front
+  the same way.
+- **Fix** (`e633e3a`). When an event's package differs from the last one, its window is looked up.
+  A system-type window whose root view belongs to System UI is ignored, with an "Ignored … drawn by
+  System UI" line. A window that isn't found, an app window, or a floating window an app draws
+  itself, like a chat head, is handled as before, so a lock is never skipped on a guess.
+  Anti-uninstall checks run earlier and are unchanged. Notification rows in the pulled-down shade
+  come from the same System UI window, so they are ignored too.
 
 ## Testing chunks 2 and 3
 
