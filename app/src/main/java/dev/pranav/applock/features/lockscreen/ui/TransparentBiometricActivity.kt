@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
@@ -58,9 +59,10 @@ class TransparentBiometricActivity: FragmentActivity() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // The fallback for a cancel that came while this activity was still in front, until it is clear
-    // whether the user stayed or the activity is leaving the screen.
-    private var pendingCancel: Runnable? = null
+    // Set while this activity stays under a lock screen it handed back after a cancel, to see
+    // whether the cancel was the user leaving. See [watchReturnedLockScreen].
+    private var isWatchingReturnedLockScreen = false
+    private var watchStartedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,7 +89,7 @@ class TransparentBiometricActivity: FragmentActivity() {
     private fun startAuthentication(intent: Intent) {
         lockedPackageName = intent.getStringExtra("locked_package")
         triggeringPackageName = intent.getStringExtra("triggering_package")
-        dropPendingCancel()
+        stopWatchingReturnedLockScreen()
         isAuthenticated = false
         hasHiddenLockScreen = false
         sessionEnded = false
@@ -118,18 +120,13 @@ class TransparentBiometricActivity: FragmentActivity() {
         override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
             super.onAuthenticationError(errorCode, errString)
             LogUtils.d(TAG, "Biometric authentication error: $errString ($errorCode)")
-            if (isActivityResumed && errorCode in CANCEL_ERRORS) {
-                waitForCancelToSettle()
-            } else {
-                fallBackToLockScreen()
-            }
+            fallBackToLockScreen(watchForLeaving = errorCode in CANCEL_ERRORS)
         }
 
         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
             super.onAuthenticationSucceeded(result)
             isAuthenticated = true
             sessionEnded = true
-            dropPendingCancel()
             appLockRepository().clearFailedAttempts()
             AppLockManager.reportBiometricAuthFinished()
             AppLockManager.isLockScreenShown.set(false)
@@ -153,43 +150,17 @@ class TransparentBiometricActivity: FragmentActivity() {
     }
 
     /**
-     * Holds back the fallback for a cancel that came while this activity was still in front.
-     *
-     * Such a cancel can be the user's (Back, or a tap outside the prompt), but One UI also cancels
-     * the prompt when Home is pressed, before this activity is paused. Falling back straight away
-     * would put the lock screen over the home screen. So the fallback waits for the first sign of
-     * which it was: window focus coming back means the user is still here, and a pause means the
-     * activity is leaving the screen. With no sign in time, the lock screen comes back as before.
-     */
-    private fun waitForCancelToSettle() {
-        if (sessionEnded || isFinishing || pendingCancel != null) return
-        val timeout = Runnable { settlePendingCancel("no sign within $CANCEL_SETTLE_TIMEOUT_MS ms") }
-        pendingCancel = timeout
-        mainHandler.postDelayed(timeout, CANCEL_SETTLE_TIMEOUT_MS)
-    }
-
-    private fun settlePendingCancel(reason: String) {
-        if (pendingCancel == null) return
-        dropPendingCancel()
-        LogUtils.d(TAG, "Cancelled prompt for $lockedPackageName settled: $reason")
-        fallBackToLockScreen()
-    }
-
-    private fun dropPendingCancel() {
-        pendingCancel?.let { mainHandler.removeCallbacks(it) }
-        pendingCancel = null
-    }
-
-    /**
      * Hands control back to the lock screen after a failed or cancelled prompt.
      *
      * While this activity is still in front, the user dismissed the prompt themselves ("Use PIN" or
      * a cancelled dialog), so the lock screen goes back up - without auto-prompting again, or
      * cancelling would loop straight back into the prompt. If the foreground is already gone, the
-     * prompt went away unanswered and [releaseUnansweredPrompt] settles it instead. A cancel that
-     * could be either passes through [waitForCancelToSettle] first.
+     * prompt went away unanswered and [releaseUnansweredPrompt] settles it instead.
+     *
+     * A plain cancel can also come from leaving, so with [watchForLeaving] this activity stays under
+     * the returned lock screen for a moment instead of finishing; see [watchReturnedLockScreen].
      */
-    private fun fallBackToLockScreen() {
+    private fun fallBackToLockScreen(watchForLeaving: Boolean = false) {
         if (sessionEnded || isFinishing) return
 
         val host = AppLockManager.lockScreenHost
@@ -202,11 +173,73 @@ class TransparentBiometricActivity: FragmentActivity() {
                 triggeringPackage = triggeringPackageName ?: "",
                 autoPromptBiometrics = false
             )
+            if (watchForLeaving) {
+                watchReturnedLockScreen()
+                return
+            }
         } else {
             releaseUnansweredPrompt()
         }
 
         finish()
+    }
+
+    /**
+     * Keeps this activity under the lock screen it just handed back, to catch a cancel that was
+     * really the user leaving.
+     *
+     * One UI cancels the prompt as soon as Home or Recents is pressed, and gives this activity its
+     * window focus back, all before the activity is stopped - to begin with, that looks exactly like
+     * Back. The difference comes a moment later: leaving stops this activity (about 0.9 s after the
+     * cancel for Home on the phone this was found on), while after Back it stays. So the activity
+     * stays under the lock screen, where it can't be seen, for up to [RETURNED_LOCK_SCREEN_WATCH_MS].
+     * If it is stopped in that time, [takeDownReturnedLockScreen] treats the prompt as one that went
+     * away unanswered. The watch ends early once the lock screen is gone some other way.
+     */
+    private fun watchReturnedLockScreen() {
+        isWatchingReturnedLockScreen = true
+        watchStartedAt = SystemClock.elapsedRealtime()
+        mainHandler.postDelayed(watchTick, WATCH_TICK_MS)
+    }
+
+    private val watchTick = object: Runnable {
+        override fun run() {
+            if (!isWatchingReturnedLockScreen) return
+            val lockScreenGone = !AppLockManager.isLockScreenShown.get()
+            val watchOver = SystemClock.elapsedRealtime() - watchStartedAt >= RETURNED_LOCK_SCREEN_WATCH_MS
+            if (lockScreenGone || watchOver) {
+                stopWatchingReturnedLockScreen()
+                finish()
+            } else {
+                mainHandler.postDelayed(this, WATCH_TICK_MS)
+            }
+        }
+    }
+
+    private fun stopWatchingReturnedLockScreen() {
+        isWatchingReturnedLockScreen = false
+        mainHandler.removeCallbacks(watchTick)
+    }
+
+    /**
+     * This activity was stopped while under a returned lock screen: the cancel was the user leaving
+     * for Home, Recents or another app, or the screen going off. The lock screen is taken down and
+     * the service told, as for any prompt that went away unanswered, so it isn't left over the home
+     * screen and the interruption counts towards waiting for a tap.
+     */
+    private fun takeDownReturnedLockScreen() {
+        stopWatchingReturnedLockScreen()
+        // Cleared already if the lock screen was unlocked or closed on the way out.
+        if (!AppLockManager.isLockScreenShown.compareAndSet(true, false)) return
+
+        LogUtils.d(TAG, "Left the lock screen for $lockedPackageName right after its prompt was cancelled")
+        val host = AppLockManager.lockScreenHost ?: return
+        host.hideLockScreen()
+        val lockedPackage = lockedPackageName ?: return
+        host.onBiometricPromptUnanswered(
+            lockedPackage = lockedPackage,
+            triggeringPackage = triggeringPackageName ?: ""
+        )
     }
 
     /**
@@ -225,7 +258,6 @@ class TransparentBiometricActivity: FragmentActivity() {
     private fun releaseUnansweredPrompt() {
         if (sessionEnded || isAuthenticated) return
         sessionEnded = true
-        dropPendingCancel()
 
         LogUtils.d(TAG, "Biometric prompt for $lockedPackageName went away unanswered")
         AppLockManager.reportBiometricAuthFinished()
@@ -251,16 +283,9 @@ class TransparentBiometricActivity: FragmentActivity() {
         hideLockScreen()
     }
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && isActivityResumed) settlePendingCancel("back in front")
-    }
-
     override fun onPause() {
         super.onPause()
         isActivityResumed = false
-        // Not resumed any more, so this falls through to releasing the prompt as unanswered.
-        if (!isChangingConfigurations) settlePendingCancel("left the screen")
         if (isFinishing) {
             AppLockManager.reportBiometricAuthFinished()
         }
@@ -269,12 +294,13 @@ class TransparentBiometricActivity: FragmentActivity() {
     override fun onStop() {
         super.onStop()
         if (isChangingConfigurations) return
+        if (isWatchingReturnedLockScreen) takeDownReturnedLockScreen()
         releaseUnansweredPrompt()
         if (!isFinishing) finish()
     }
 
     override fun onDestroy() {
-        dropPendingCancel()
+        stopWatchingReturnedLockScreen()
         // A backstop for a destroy that did not pass through onStop's release.
         if (!isChangingConfigurations) releaseUnansweredPrompt()
         super.onDestroy()
@@ -285,9 +311,10 @@ class TransparentBiometricActivity: FragmentActivity() {
     }
 
     private companion object {
-        // Cancels that can come from Android rather than the user, like Home pressed on the prompt.
+        // Cancels that can come from leaving rather than from the user, like Home pressed on the prompt.
         val CANCEL_ERRORS = setOf(BiometricPrompt.ERROR_CANCELED, BiometricPrompt.ERROR_USER_CANCELED)
 
-        const val CANCEL_SETTLE_TIMEOUT_MS = 1_000L
+        const val RETURNED_LOCK_SCREEN_WATCH_MS = 3_000L
+        const val WATCH_TICK_MS = 100L
     }
 }
