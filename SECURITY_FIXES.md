@@ -17,7 +17,7 @@ closing it. Chunk 5 fixes a bug found in use, not an audit finding.
 | 2 — Rate limiting | F4 | `fix/security-rate-limiting` | [#6](https://github.com/thiagosoeiro/AppLock/pull/6) | green (`8f790a9`) | LGTM | `fa1e06b` |
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
 | 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`cafddd4`) | 3 rounds | `9e2387c` |
-| 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | pending | pending | pending | — |
+| 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -206,7 +206,7 @@ merged as `9e2387c`.
   is ever worth it: also clear the window when the screen turns off, which our own lock causes at
   once, so only the duplicates arriving before the screen is off are swallowed.
 
-## Chunk 5 — Interrupted biometric prompt
+## Chunk 5 — Interrupted biometric prompt (done, one check pending)
 
 Not from the audit. On 2026-09-16 a locked app showed its lock screen for a moment and then opened,
 and after that every locked app opened without authentication until the screen went off. The bug
@@ -309,6 +309,12 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   - Not reached: the lock screen up for more than 3 s when the screen goes off. Both times power was
     pressed on a returned lock screen, it was within 3 s of the cancel, so the watch took it down
     first.
+- **Merged** on 2026-09-16 in PR #23 after the seventh test, with one check left for later.
+- **Pending check** for `f794f05`, the screen-off takedown. On a locked app, tap "Use PIN" (or use a
+  lock screen that waits for a tap), wait about 5 s, press the power button, then turn the screen
+  on. Expected: the phone's own lock screen with no app lock screen over it, and the app locks again
+  once the phone is unlocked. With Logging on, the lock screen's window should be removed at
+  "Screen off detected" with no "Left the lock screen" line before it.
 
 ## Testing chunks 2 and 3
 
