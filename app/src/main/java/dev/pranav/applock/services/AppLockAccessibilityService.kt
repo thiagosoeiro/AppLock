@@ -266,7 +266,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
 
         try {
-            processPackageLocking(packageName)
+            processPackageLocking(packageName, event)
         } catch (e: Exception) {
             logError("Error processing package locking for $packageName", e)
         }
@@ -329,10 +329,13 @@ class AppLockAccessibilityService : AccessibilityService() {
     /**
      * The launcher draws both the home screen and, on most devices, the recents switcher. Neither
      * means the user has opened something else, so an unlock survives them for a short window.
-     * Everything else that is not a real app - system UI, the intent resolver, keyboards - is
-     * already filtered out by [isValidPackageForLocking] before this is reached.
+     * Secure Folder's home and lock screen count the same way; see
+     * [AppLockConstants.NEUTRAL_SURFACE_APPS]. Everything else that is not a real app - system UI,
+     * the intent resolver, keyboards - is already filtered out by [isValidPackageForLocking]
+     * before this is reached.
      */
     private fun isNeutralSurface(packageName: String): Boolean {
+        if (packageName in AppLockConstants.NEUTRAL_SURFACE_APPS) return true
         val launcher = getSystemDefaultLauncherPackageName()
         return launcher.isNotEmpty() && packageName == launcher
     }
@@ -361,7 +364,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         return true
     }
 
-    private fun processPackageLocking(packageName: String) {
+    private fun processPackageLocking(packageName: String, event: AccessibilityEvent) {
         val currentForegroundPackage = packageName
         val triggeringPackage = lastForegroundPackage
         lastForegroundPackage = currentForegroundPackage
@@ -379,9 +382,12 @@ class AppLockAccessibilityService : AccessibilityService() {
             unlockedApp != currentForegroundPackage &&
             currentForegroundPackage !in appLockRepository.getTriggerExcludedApps()
         ) {
+            // The window and event type say what took over, such as a dialog or another app's screen.
+            val takenOverBy = "${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}"
+            val surface = if (isNeutral) ", a neutral surface" else ""
             LogUtils.d(
                 TAG,
-                "Switched from unlocked app $unlockedApp to $currentForegroundPackage."
+                "Switched from unlocked app $unlockedApp to $currentForegroundPackage ($takenOverBy)$surface."
             )
             if (isNeutral) {
                 AppLockManager.holdUnlockForReturn(unlockedApp)

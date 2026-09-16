@@ -34,6 +34,17 @@ object AppLockConstants {
         "com.samsung.android.biometrics.app.setting"
     )
 
+    /**
+     * Besides the launcher, packages whose screens lead back into apps rather than being apps to
+     * leave for. Samsung's Secure Folder draws its own home and lock screen around the apps inside
+     * it, and can lock itself when one of them is covered from outside it, as by our fingerprint
+     * prompt; on the phone, its windows turned up right after an app inside it was unlocked, which
+     * locked that app again. Unlike [EXCLUDED_APPS], these are still locked if they are in the list.
+     */
+    val NEUTRAL_SURFACE_APPS = setOf(
+        "com.samsung.knox.securefolder"
+    )
+
     val ACCESSIBILITY_SETTINGS_CLASSES = setOf(
         "com.android.settings.accessibility.AccessibilitySettings",
         "com.android.settings.accessibility.AccessibilityMenuActivity",
