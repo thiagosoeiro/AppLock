@@ -255,7 +255,15 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   launcher, so leaving an unlocked app for it holds the unlock for the 5 s return window. It is not
   excluded, so it still locks if it is in the list. The switch log line names the window class and
   event type.
-- **Third phone test:** pending.
+- **Third phone test** (2026-09-16, same phone, a day of normal use):
+  - Inside Secure Folder, each app locked once. Secure Folder's own events came 5–15 s after the
+    unlocks, all content changes in the background, and each was held and let go without a second
+    lock.
+  - Two real covered prompts on one app, 0.75 s and 0.87 s after they appeared: the lock screen was
+    back within 58–88 ms and prompted again, and the check 300 ms later added no second lock screen.
+    Fingerprint unlocked it, and the next locked app locked as usual.
+  - Cancelling the prompt brought the lock screen back without prompting, as before.
+  - Still not reached: Home, Recents or screen off on the prompt, and the two-interruption limit.
 
 ## Testing chunks 2 and 3
 
