@@ -235,7 +235,18 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   if it is the one the prompt was for, or one skipped while the prompt was up, so an app that sits
   still is locked without waiting for its next event. The wait lets Home or Recents report the
   launcher first.
-- **Phone test:** pending.
+- **First phone test** (2026-09-16, same phone):
+  - Three covered prompts on two apps each logged "went away unanswered", and the lock screen was
+    back within 46–108 ms, prompted again, and unlocked. Other locked apps kept locking.
+  - Cancelling the prompt brought the lock screen back without prompting.
+  - Not reached: Home, Recents or screen off on the prompt, and the two-interruption limit.
+  - Found: One UI draws the fingerprint prompt from its own package, which wasn't excluded. An app
+    with its own fingerprint lock looped seven of our prompts in 18 s, since its prompt counted as
+    leaving the app, and the check after an unanswered prompt looked at the prompt itself. The
+    same code runs without this PR, so the loop wasn't caused by it.
+- **Changed after the test** (`a4a580b`): `com.samsung.android.biometrics.app.setting` is excluded
+  like System UI.
+- **Second phone test:** pending.
 
 ## Testing chunks 2 and 3
 
