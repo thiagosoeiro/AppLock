@@ -3,6 +3,7 @@ package dev.pranav.applock.services
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -10,6 +11,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Handler
 import android.os.LocaleList
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -71,6 +73,14 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     private var lastForegroundPackage = ""
 
+    // The last app whose check was skipped because a biometric prompt was in flight, and the app it
+    // was opened from, since the start of the current lock session; see [handleUnansweredPrompt].
+    private var skippedDuringPromptPackage = ""
+    private var skippedDuringPromptTrigger = ""
+
+    // The re-check waiting to run after an unanswered prompt, if any.
+    private var pendingPromptRecheck: Runnable? = null
+
     // Anti-uninstall's view of the last page Settings or the package installer opened: which one it
     // is, until when its content is still being checked, and when the installer last opened an
     // uninstall screen and last showed our name, which together say it is about uninstalling us.
@@ -124,6 +134,10 @@ class AppLockAccessibilityService : AccessibilityService() {
         // After a guard locks the phone, how long it ignores the same attempt matching again.
         private const val BLOCK_REPEAT_WINDOW_MS = 2_000L
 
+        // After a prompt goes away unanswered, how long to wait before checking the app in front,
+        // so that Home or Recents has reported the launcher by then.
+        private const val PROMPT_RECHECK_DELAY_MS = 300L
+
         @Volatile
         var isServiceRunning = false
 
@@ -144,6 +158,12 @@ class AppLockAccessibilityService : AccessibilityService() {
                     LogUtils.d(TAG, "Screen off detected. Resetting AppLock state.")
                     AppLockManager.isLockScreenShown.set(false)
                     AppLockManager.clearAllUnlockStates()
+                    AppLockManager.clearBiometricPromptInterruptions()
+                    cancelPromptRecheck()
+                    takeDownLockScreenIfPhoneLocked()
+                } else if (intent?.action == Intent.ACTION_SCREEN_ON) {
+                    // The phone may only have locked after the screen went off.
+                    takeDownLockScreenIfPhoneLocked()
                 } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
                     // Unlocked: a guard matching from now on is a new attempt, not a repeat.
                     lastBlockAt = 0L
@@ -169,6 +189,7 @@ class AppLockAccessibilityService : AccessibilityService() {
 
             val filter = android.content.IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_USER_PRESENT)
             }
             registerReceiver(screenStateReceiver, filter)
@@ -251,7 +272,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
 
         try {
-            processPackageLocking(packageName)
+            processPackageLocking(packageName, event)
         } catch (e: Exception) {
             logError("Error processing package locking for $packageName", e)
         }
@@ -314,10 +335,13 @@ class AppLockAccessibilityService : AccessibilityService() {
     /**
      * The launcher draws both the home screen and, on most devices, the recents switcher. Neither
      * means the user has opened something else, so an unlock survives them for a short window.
-     * Everything else that is not a real app - system UI, the intent resolver, keyboards - is
-     * already filtered out by [isValidPackageForLocking] before this is reached.
+     * Secure Folder's home and lock screen count the same way; see
+     * [AppLockConstants.NEUTRAL_SURFACE_APPS]. Everything else that is not a real app - system UI,
+     * the intent resolver, keyboards - is already filtered out by [isValidPackageForLocking]
+     * before this is reached.
      */
     private fun isNeutralSurface(packageName: String): Boolean {
+        if (packageName in AppLockConstants.NEUTRAL_SURFACE_APPS) return true
         val launcher = getSystemDefaultLauncherPackageName()
         return launcher.isNotEmpty() && packageName == launcher
     }
@@ -346,7 +370,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         return true
     }
 
-    private fun processPackageLocking(packageName: String) {
+    private fun processPackageLocking(packageName: String, event: AccessibilityEvent) {
         val currentForegroundPackage = packageName
         val triggeringPackage = lastForegroundPackage
         lastForegroundPackage = currentForegroundPackage
@@ -364,9 +388,12 @@ class AppLockAccessibilityService : AccessibilityService() {
             unlockedApp != currentForegroundPackage &&
             currentForegroundPackage !in appLockRepository.getTriggerExcludedApps()
         ) {
+            // The window and event type say what took over, such as a dialog or another app's screen.
+            val takenOverBy = "${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}"
+            val surface = if (isNeutral) ", a neutral surface" else ""
             LogUtils.d(
                 TAG,
-                "Switched from unlocked app $unlockedApp to $currentForegroundPackage."
+                "Switched from unlocked app $unlockedApp to $currentForegroundPackage ($takenOverBy)$surface."
             )
             if (isNeutral) {
                 AppLockManager.holdUnlockForReturn(unlockedApp)
@@ -390,6 +417,9 @@ class AppLockAccessibilityService : AccessibilityService() {
     private fun checkAndLockApp(packageName: String, triggeringPackage: String, currentTime: Long) {
         // Return early if lock screen is already shown or biometric auth is in progress
         if (AppLockManager.currentBiometricState == BiometricState.AUTH_STARTED) {
+            // Kept in case the prompt goes away unanswered, when this app may need locking after all.
+            skippedDuringPromptPackage = packageName
+            skippedDuringPromptTrigger = triggeringPackage
             return
         }
 
@@ -434,7 +464,84 @@ class AppLockAccessibilityService : AccessibilityService() {
         override fun hideLockScreen() {
             mainHandler.post { overlayManager?.removeOverlay() }
         }
+
+        override fun onBiometricPromptUnanswered(lockedPackage: String, triggeringPackage: String) {
+            handleUnansweredPrompt(lockedPackage, triggeringPackage)
+        }
     }
+
+    /**
+     * A prompt that had taken the lock screen down for [lockedPackage] went away unanswered, and
+     * the lock screen flag is clear again. The app's next event would lock it, but a screen that
+     * sits still sends none, so the app in front is checked shortly as well.
+     */
+    private fun handleUnansweredPrompt(lockedPackage: String, triggeringPackage: String) {
+        val skippedPackage = skippedDuringPromptPackage
+        val skippedTrigger = skippedDuringPromptTrigger
+        skippedDuringPromptPackage = ""
+        skippedDuringPromptTrigger = ""
+
+        // With the screen off there is nothing on it to lock, and screen-off resets the rest.
+        if (!isScreenInteractive()) return
+
+        AppLockManager.recordBiometricPromptInterrupted(lockedPackage)
+
+        cancelPromptRecheck()
+        val recheck = Runnable {
+            pendingPromptRecheck = null
+            recheckAfterUnansweredPrompt(lockedPackage, triggeringPackage, skippedPackage, skippedTrigger)
+        }
+        pendingPromptRecheck = recheck
+        mainHandler.postDelayed(recheck, PROMPT_RECHECK_DELAY_MS)
+    }
+
+    /**
+     * Locks the app in front if it is the one the prompt was for, or the last one skipped while the
+     * prompt was up - both already passed the trigger exclusions on their way to [checkAndLockApp].
+     * Anything else the user moved to is locked, or not, by its own events.
+     */
+    private fun recheckAfterUnansweredPrompt(
+        lockedPackage: String,
+        triggeringPackage: String,
+        skippedPackage: String,
+        skippedTrigger: String
+    ) {
+        if (!appLockRepository.isProtectionActive() || !isScreenInteractive()) return
+
+        val foreground = lastForegroundPackage
+        if (foreground.isEmpty()) return
+        val trigger = when (foreground) {
+            skippedPackage -> skippedTrigger
+            lockedPackage -> triggeringPackage
+            else -> return
+        }
+        if (!isValidPackageForLocking(foreground)) return
+
+        LogUtils.d(TAG, "Checking $foreground again after an unanswered biometric prompt")
+        checkAndLockApp(foreground, trigger, System.currentTimeMillis())
+    }
+
+    private fun cancelPromptRecheck() {
+        pendingPromptRecheck?.let { mainHandler.removeCallbacks(it) }
+        pendingPromptRecheck = null
+    }
+
+    /**
+     * Takes the lock screen down once the phone's own secure lock is on. Left up, it would sit over
+     * the phone's lock screen, showing the locked app's name and taking taps meant for the phone.
+     * The phone's lock covers the app instead, and screen-off has already cleared the lock state, so
+     * the app locks again from its own events once the phone is unlocked, like any app after screen
+     * off. While the phone isn't locked (a lock delay, or a swipe-only or no screen lock), the lock
+     * screen stays up, since nothing else covers the app.
+     */
+    private fun takeDownLockScreenIfPhoneLocked() {
+        if (getSystemService(KeyguardManager::class.java)?.isDeviceLocked != true) return
+        mainHandler.post { overlayManager?.removeOverlay() }
+    }
+
+    // Unknown counts as on, so a failed lookup errs towards locking.
+    private fun isScreenInteractive(): Boolean =
+        getSystemService(PowerManager::class.java)?.isInteractive != false
 
     private fun showLockScreenOverlay(
         packageName: String,
@@ -446,6 +553,12 @@ class AppLockAccessibilityService : AccessibilityService() {
         // here rather than in the post below: events for one app can arrive in a burst, and each
         // would otherwise still see it clear and open its own lock screen and prompt.
         if (autoPromptBiometrics && !AppLockManager.isLockScreenShown.compareAndSet(false, true)) return
+
+        if (autoPromptBiometrics) {
+            // A new lock session: what an earlier prompt skipped is no longer this one's to lock.
+            skippedDuringPromptPackage = ""
+            skippedDuringPromptTrigger = ""
+        }
 
         LogUtils.d(TAG, "Showing overlay for: $packageName")
 
@@ -470,8 +583,15 @@ class AppLockAccessibilityService : AccessibilityService() {
             // The overlay is up first and stays up until the prompt is on screen, so the locked
             // app is never briefly visible behind it.
             if (autoPromptBiometrics && canPromptBiometrics()) {
-                LogUtils.d(TAG, "Auto-prompting biometrics for: $packageName")
-                startBiometricPrompt(packageName, triggeringPackage)
+                if (AppLockManager.shouldAutoPromptBiometrics(packageName)) {
+                    LogUtils.d(TAG, "Auto-prompting biometrics for: $packageName")
+                    startBiometricPrompt(packageName, triggeringPackage)
+                } else {
+                    LogUtils.d(
+                        TAG,
+                        "Lock screen for $packageName waits for a tap: its prompt was interrupted twice"
+                    )
+                }
             }
         }
     }
@@ -939,7 +1059,10 @@ class AppLockAccessibilityService : AccessibilityService() {
 
             AppLockManager.lockScreenHost = null
             overlayManager?.removeOverlay()
-            if (::mainHandler.isInitialized) stopGuardedPageChecks()
+            if (::mainHandler.isInitialized) {
+                stopGuardedPageChecks()
+                cancelPromptRecheck()
+            }
 
             try {
                 unregisterReceiver(screenStateReceiver)

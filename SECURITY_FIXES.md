@@ -1,12 +1,13 @@
 # Security fixes
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
-before merging, and a fourth after anti-uninstall was beaten on the phone. The audit's findings
-table records the status of every finding, including the ones left open.
+before merging, a fourth after anti-uninstall was beaten on the phone, and a fifth after locked apps
+opened freely on the phone. The audit's findings table records the status of every finding,
+including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it.
+closing it. Chunk 5 fixes a bug found in use, not an audit finding.
 
 ## Status
 
@@ -16,6 +17,7 @@ closing it.
 | 2 — Rate limiting | F4 | `fix/security-rate-limiting` | [#6](https://github.com/thiagosoeiro/AppLock/pull/6) | green (`8f790a9`) | LGTM | `fa1e06b` |
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
 | 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`cafddd4`) | 3 rounds | `9e2387c` |
+| 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -203,6 +205,116 @@ merged as `9e2387c`.
   and device admin still blocks uninstall and still locks from the admin callbacks. The fix, if it
   is ever worth it: also clear the window when the screen turns off, which our own lock causes at
   once, so only the duplicates arriving before the screen is off are swallowed.
+
+## Chunk 5 — Interrupted biometric prompt (done, one check pending)
+
+Not from the audit. On 2026-09-16 a locked app showed its lock screen for a moment and then opened,
+and after that every locked app opened without authentication until the screen went off. The bug
+came in with the auto-prompt (`64fbb7d`). One commit per change.
+
+- **Why it failed.** The log showed the same sequence twice:
+  - the lock screen opened and raised the fingerprint prompt, which took the lock screen down once
+    it was on screen;
+  - about 0.9 s later the app opened its next screen over the prompt, and Android cancelled it;
+  - the biometric library passes errors on only while the prompt's activity is started, so the
+    fallback to the lock screen never ran. While the activity lived, the service believed an
+    authentication was still in flight and skipped every locked app without a log line;
+  - once Android destroyed the activity, that was cleared but the lock screen flag was not, so
+    every locked app was skipped as "lock screen already shown" until the screen went off.
+
+  Pressing Home, opening Recents or taking a call over the prompt leaves it the same way.
+- **Release** (`e518cb6`). A prompt that leaves the screen without an answer clears the in-flight
+  state, cancels itself, finishes, and, if it had taken the lock screen down, clears the flag and
+  tells the service. That covers onStop, a destroy that skipped onStop, and an error while not
+  resumed. Success and the hand-back to the lock screen settle the session first, so they are
+  unchanged, and config changes are skipped.
+- **Re-prompt once** (`4dd2f8c`). The returning lock screen raises the prompt again. Once the same
+  app's prompt has been interrupted twice with gaps under 10 s, its lock screen waits for a tap on
+  the fingerprint icon or the PIN, so an app that keeps covering the prompt can't loop it.
+- **Check again** (`3daf5ab`). 300 ms after an unanswered prompt, the app in front is checked again
+  if it is the one the prompt was for, or one skipped while the prompt was up, so an app that sits
+  still is locked without waiting for its next event. The wait lets Home or Recents report the
+  launcher first.
+- **First phone test** (2026-09-16, same phone):
+  - Three covered prompts on two apps each logged "went away unanswered", and the lock screen was
+    back within 46–108 ms, prompted again, and unlocked. Other locked apps kept locking.
+  - Cancelling the prompt brought the lock screen back without prompting.
+  - Not reached: Home, Recents or screen off on the prompt, and the two-interruption limit.
+  - Found: One UI draws the fingerprint prompt from its own package, which wasn't excluded. An app
+    inside Secure Folder looped seven of our prompts in 18 s: a fingerprint prompt over it, taken
+    at the time for the app's own lock but more likely Secure Folder's, counted as leaving the
+    app, and the check after an unanswered prompt looked at the prompt itself. The same code runs
+    without this PR, so the loop wasn't caused by it.
+- **Changed after the test** (`a4a580b`): `com.samsung.android.biometrics.app.setting` is excluded
+  like System UI.
+- **Second phone test** (2026-09-16, same phone): unlocks outside Secure Folder were clean, and the
+  fingerprint prompt no longer counted as leaving. An app inside Secure Folder still locked again
+  five times in 25 s: after each unlock, a Secure Folder window, sometimes 40 ms later, counted as
+  switching to another app. Home, Recents, screen off and the limit were still not reached.
+- **Changed after the second test** (`e6851f3`): Secure Folder counts as a neutral surface, like the
+  launcher, so leaving an unlocked app for it holds the unlock for the 5 s return window. It is not
+  excluded, so it still locks if it is in the list. The switch log line names the window class and
+  event type.
+- **Third phone test** (2026-09-16, same phone, a day of normal use):
+  - Inside Secure Folder, each app locked once. Secure Folder's own events came 5–15 s after the
+    unlocks, all content changes in the background, and each was held and let go without a second
+    lock.
+  - Two real covered prompts on one app, 0.75 s and 0.87 s after they appeared: the lock screen was
+    back within 58–88 ms and prompted again, and the check 300 ms later added no second lock screen.
+    Fingerprint unlocked it, and the next locked app locked as usual.
+  - Cancelling the prompt brought the lock screen back without prompting, as before.
+  - Still not reached: Home, Recents or screen off on the prompt, and the two-interruption limit.
+- **Fourth phone test** (2026-09-16, same phone):
+  - Power button on the prompt, three times: the app locked again once the phone was unlocked. One UI
+    cancels the prompt at the key press, while the prompt's activity is still in front, so the lock
+    screen came back just before the screen went dark and then stayed over the phone's own lock
+    screen. Screen-off has never taken the lock screen down; that is older than this PR and left for
+    now.
+  - Home on the prompt: the lock screen came back over the home screen. One UI reported the cancel
+    as the user's while the activity was still in front, so it was handled like Back.
+  - The two-interruption limit was not reached.
+- **Changed after the fourth test** (`fcc9c8b`): a cancel that arrived while the prompt's activity
+  was still in front waited up to 1 s, returning to the lock screen once window focus came back and
+  releasing the prompt if the activity was paused first.
+- **Fifth phone test** (2026-09-16, same phone): it didn't work. Of 16 cancels, only two were
+  released; the other 14 went back to the lock screen. One UI hands the activity its focus back about
+  20 ms after a cancel, while leaving for Home stops the activity only about 0.9 s later.
+- **Changed after the fifth test** (`1e782be`): a cancel returns to the lock screen at once again,
+  and the prompt's activity stays under it for up to 3 s. If the activity is stopped in that time,
+  by Home, Recents, another app or the screen going off, the lock screen is taken down and the
+  prompt counts as one that went away unanswered. After Back the activity isn't stopped, so the lock
+  screen stays. The watch ends early once the lock screen is unlocked or closed.
+- **Sixth phone test** (2026-09-16, same phone):
+  - Home on the prompt, six times: each time the activity stopped 0.86–0.95 s after the cancel, the
+    lock screen was taken down, and the app locked again when reopened.
+  - Home twice within 10 s, done twice: the next lock screen waited for a tap both times.
+  - Back on the prompt: the activity was not stopped, and the lock screen stayed.
+  - Power button: both times the screen went off, a cancel had already put the lock screen back
+    3–17 s earlier, so it stayed over the phone's own lock screen. That is the older screen-off
+    behaviour, not the prompt.
+- **Changed after the sixth test**, two older behaviours, each in its own commit:
+  - `f794f05`: screen-off cleared the lock state but left the lock screen up. It is now taken down
+    at screen off, or at screen on if the phone locked later, but only while the phone's secure
+    lock is on. The app locks again from its own events once the phone is unlocked. With a lock
+    delay or no secure lock, the lock screen stays up as before, since nothing else covers the app.
+  - `442a865`: Back and the back gesture did nothing on the lock screen. The key reached its window
+    unhandled, because the lock screen's back handler only hears from an activity. The window now
+    passes Back on, so it closes the lock screen like the close button (Android 9 and later).
+- **Seventh phone test** (2026-09-16, same phone):
+  - Power button on the prompt, on two apps: the lock screen came down 0.4 s after the cancel and
+    before the screen went off; each app locked again once the phone was unlocked.
+  - Back gesture on the lock screen, twice: it closed 0.2 s later, like the close button.
+  - Home on the prompt still takes the lock screen down, and two in 10 s still make the next one wait
+    for a tap. An app covering its own prompt was handled as before.
+  - Not reached: the lock screen up for more than 3 s when the screen goes off. Both times power was
+    pressed on a returned lock screen, it was within 3 s of the cancel, so the watch took it down
+    first.
+- **Merged** on 2026-09-16 in PR #23 after the seventh test, with one check left for later.
+- **Pending check** for `f794f05`, the screen-off takedown. On a locked app, tap "Use PIN" (or use a
+  lock screen that waits for a tap), wait about 5 s, press the power button, then turn the screen
+  on. Expected: the phone's own lock screen with no app lock screen over it, and the app locks again
+  once the phone is unlocked. With Logging on, the lock screen's window should be removed at
+  "Screen off detected" with no "Left the lock screen" line before it.
 
 ## Testing chunks 2 and 3
 
