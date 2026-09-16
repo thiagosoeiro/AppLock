@@ -264,6 +264,21 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
     Fingerprint unlocked it, and the next locked app locked as usual.
   - Cancelling the prompt brought the lock screen back without prompting, as before.
   - Still not reached: Home, Recents or screen off on the prompt, and the two-interruption limit.
+- **Fourth phone test** (2026-09-16, same phone):
+  - Power button on the prompt, three times: the app locked again once the phone was unlocked. One UI
+    cancels the prompt at the key press, while the prompt's activity is still in front, so the lock
+    screen came back just before the screen went dark and then stayed over the phone's own lock
+    screen. Screen-off has never taken the lock screen down; that is older than this PR and left for
+    now.
+  - Home on the prompt: the lock screen came back over the home screen. One UI reported the cancel
+    as the user's while the activity was still in front, so it was handled like Back.
+  - The two-interruption limit was not reached.
+- **Changed after the fourth test** (`fcc9c8b`): a cancel that arrives while the prompt's activity is still in
+  front waits up to 1 s for a sign of what happened. If window focus comes back, the user dismissed
+  the prompt and the lock screen returns as before. If the activity is paused, it is leaving the
+  screen and is released as unanswered, so nothing is left over the home screen. With no sign in
+  that time, the lock screen returns. "Use PIN" and lockouts still return to the lock screen at
+  once. The log names which way each cancel went.
 
 ## Testing chunks 2 and 3
 
