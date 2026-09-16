@@ -28,7 +28,10 @@ object AppLockConstants {
         "com.google.android.googlequicksearchbox",
         "android",
         "com.google.android.gms",
-        "com.google.android.webview"
+        "com.google.android.webview",
+        // One UI's fingerprint prompt, for our prompt and every other app's. Android draws it from
+        // System UI, excluded above; Samsung gives it a package of its own.
+        "com.samsung.android.biometrics.app.setting"
     )
 
     val ACCESSIBILITY_SETTINGS_CLASSES = setOf(
