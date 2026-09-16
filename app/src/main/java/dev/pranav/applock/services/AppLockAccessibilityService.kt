@@ -3,6 +3,7 @@ package dev.pranav.applock.services
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -159,6 +160,10 @@ class AppLockAccessibilityService : AccessibilityService() {
                     AppLockManager.clearAllUnlockStates()
                     AppLockManager.clearBiometricPromptInterruptions()
                     cancelPromptRecheck()
+                    takeDownLockScreenIfPhoneLocked()
+                } else if (intent?.action == Intent.ACTION_SCREEN_ON) {
+                    // The phone may only have locked after the screen went off.
+                    takeDownLockScreenIfPhoneLocked()
                 } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
                     // Unlocked: a guard matching from now on is a new attempt, not a repeat.
                     lastBlockAt = 0L
@@ -184,6 +189,7 @@ class AppLockAccessibilityService : AccessibilityService() {
 
             val filter = android.content.IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_USER_PRESENT)
             }
             registerReceiver(screenStateReceiver, filter)
@@ -518,6 +524,19 @@ class AppLockAccessibilityService : AccessibilityService() {
     private fun cancelPromptRecheck() {
         pendingPromptRecheck?.let { mainHandler.removeCallbacks(it) }
         pendingPromptRecheck = null
+    }
+
+    /**
+     * Takes the lock screen down once the phone's own secure lock is on. Left up, it would sit over
+     * the phone's lock screen, showing the locked app's name and taking taps meant for the phone.
+     * The phone's lock covers the app instead, and screen-off has already cleared the lock state, so
+     * the app locks again from its own events once the phone is unlocked, like any app after screen
+     * off. While the phone isn't locked (a lock delay, or a swipe-only or no screen lock), the lock
+     * screen stays up, since nothing else covers the app.
+     */
+    private fun takeDownLockScreenIfPhoneLocked() {
+        if (getSystemService(KeyguardManager::class.java)?.isDeviceLocked != true) return
+        mainHandler.post { overlayManager?.removeOverlay() }
     }
 
     // Unknown counts as on, so a failed lookup errs towards locking.
