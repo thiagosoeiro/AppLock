@@ -434,6 +434,10 @@ class AppLockAccessibilityService : AccessibilityService() {
         override fun hideLockScreen() {
             mainHandler.post { overlayManager?.removeOverlay() }
         }
+
+        override fun onBiometricPromptUnanswered(lockedPackage: String, triggeringPackage: String) {
+            // With the flag cleared, the app's next event locks it again.
+        }
     }
 
     private fun showLockScreenOverlay(

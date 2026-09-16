@@ -110,6 +110,12 @@ object AppLockManager {
         )
 
         fun hideLockScreen()
+
+        /**
+         * A prompt that had taken the lock screen down for [lockedPackage] left the screen without
+         * an answer. The lock screen flag is already cleared; the host decides what to lock now.
+         */
+        fun onBiometricPromptUnanswered(lockedPackage: String, triggeringPackage: String)
     }
 
     @Volatile

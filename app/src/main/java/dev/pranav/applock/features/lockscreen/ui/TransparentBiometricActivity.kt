@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import dev.pranav.applock.R
+import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.services.AppLockManager
 import dev.pranav.applock.ui.theme.AppLockTheme
@@ -47,6 +48,12 @@ class TransparentBiometricActivity: FragmentActivity() {
     private var hasHiddenLockScreen = false
     private var isAuthenticated = false
 
+    private var biometricPrompt: BiometricPrompt? = null
+
+    // Set once this prompt's lock session is settled: authenticated, handed back to the lock screen,
+    // or released after going away unanswered. Whatever comes later leaves the lock state alone.
+    private var sessionEnded = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -74,11 +81,13 @@ class TransparentBiometricActivity: FragmentActivity() {
         triggeringPackageName = intent.getStringExtra("triggering_package")
         isAuthenticated = false
         hasHiddenLockScreen = false
+        sessionEnded = false
 
         AppLockManager.reportBiometricAuthStarted()
 
         val executor = ContextCompat.getMainExecutor(this)
-        val biometricPrompt = BiometricPrompt(this, executor, authenticationCallback)
+        val prompt = BiometricPrompt(this, executor, authenticationCallback)
+        biometricPrompt = prompt
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle(getString(R.string.biometric_verify_title))
@@ -88,7 +97,7 @@ class TransparentBiometricActivity: FragmentActivity() {
             .build()
 
         try {
-            biometricPrompt.authenticate(promptInfo)
+            prompt.authenticate(promptInfo)
             if (isActivityResumed) hideLockScreen()
         } catch (e: Exception) {
             Log.e(TAG, "Biometric failed to start", e)
@@ -99,13 +108,14 @@ class TransparentBiometricActivity: FragmentActivity() {
     private val authenticationCallback = object: BiometricPrompt.AuthenticationCallback() {
         override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
             super.onAuthenticationError(errorCode, errString)
-            Log.d(TAG, "Biometric authentication error: $errString ($errorCode)")
+            LogUtils.d(TAG, "Biometric authentication error: $errString ($errorCode)")
             fallBackToLockScreen()
         }
 
         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
             super.onAuthenticationSucceeded(result)
             isAuthenticated = true
+            sessionEnded = true
             appLockRepository().clearFailedAttempts()
             AppLockManager.reportBiometricAuthFinished()
             AppLockManager.isLockScreenShown.set(false)
@@ -133,29 +143,62 @@ class TransparentBiometricActivity: FragmentActivity() {
      *
      * While this activity is still in front, the user dismissed the prompt themselves ("Use PIN" or
      * a cancelled dialog), so the lock screen goes back up - without auto-prompting again, or
-     * cancelling would loop straight back into the prompt. If the foreground is already gone (Home
-     * pressed, or the system cancelled the prompt), no lock screen is forced over whatever the user
-     * moved to; clearing [AppLockManager.isLockScreenShown] instead lets the accessibility service
-     * lock the app again the next time it comes forward.
+     * cancelling would loop straight back into the prompt. If the foreground is already gone, the
+     * prompt went away unanswered and [releaseUnansweredPrompt] settles it instead.
      */
     private fun fallBackToLockScreen() {
-        if (isFinishing || isAuthenticated) return
-
-        AppLockManager.reportBiometricAuthFinished()
+        if (sessionEnded || isFinishing) return
 
         val host = AppLockManager.lockScreenHost
         val lockedPackage = lockedPackageName
         if (isActivityResumed && host != null && lockedPackage != null) {
+            sessionEnded = true
+            AppLockManager.reportBiometricAuthFinished()
             host.showLockScreen(
                 packageName = lockedPackage,
                 triggeringPackage = triggeringPackageName ?: "",
                 autoPromptBiometrics = false
             )
         } else {
-            AppLockManager.isLockScreenShown.set(false)
+            releaseUnansweredPrompt()
         }
 
         finish()
+    }
+
+    /**
+     * Ends the lock session of a prompt that left the screen without an answer: another app came
+     * in front of it, Home or Recents was opened, or the screen went off.
+     *
+     * Android cancels the prompt then, but the biometric library only passes errors on while this
+     * activity is started, so [fallBackToLockScreen] never hears of it. Left alone, the service
+     * would keep believing an authentication is in flight, and then that a lock screen is showing,
+     * and skip every locked app until the screen went off.
+     *
+     * If this prompt had already taken the lock screen down, the lock screen flag is cleared and
+     * the service is told, so it can lock whatever app is now in front. If the lock screen never
+     * came down, it is still up and still owns the flag, so both are left as they are.
+     */
+    private fun releaseUnansweredPrompt() {
+        if (sessionEnded || isAuthenticated) return
+        sessionEnded = true
+
+        LogUtils.d(TAG, "Biometric prompt for $lockedPackageName went away unanswered")
+        AppLockManager.reportBiometricAuthFinished()
+
+        try {
+            biometricPrompt?.cancelAuthentication()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not cancel the biometric prompt", e)
+        }
+
+        if (!hasHiddenLockScreen) return
+        AppLockManager.isLockScreenShown.set(false)
+        val lockedPackage = lockedPackageName ?: return
+        AppLockManager.lockScreenHost?.onBiometricPromptUnanswered(
+            lockedPackage = lockedPackage,
+            triggeringPackage = triggeringPackageName ?: ""
+        )
     }
 
     override fun onResume() {
@@ -172,7 +215,16 @@ class TransparentBiometricActivity: FragmentActivity() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        if (isChangingConfigurations) return
+        releaseUnansweredPrompt()
+        if (!isFinishing) finish()
+    }
+
     override fun onDestroy() {
+        // A backstop for a destroy that did not pass through onStop's release.
+        if (!isChangingConfigurations) releaseUnansweredPrompt()
         super.onDestroy()
         // Never leave the backends believing an authentication is still in flight.
         if (!isAuthenticated) {
