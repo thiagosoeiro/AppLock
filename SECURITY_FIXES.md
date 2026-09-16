@@ -1,12 +1,13 @@
 # Security fixes
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
-before merging, and a fourth after anti-uninstall was beaten on the phone. The audit's findings
-table records the status of every finding, including the ones left open.
+before merging, a fourth after anti-uninstall was beaten on the phone, and a fifth after locked apps
+opened freely on the phone. The audit's findings table records the status of every finding,
+including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it.
+closing it. Chunk 5 fixes a bug found in use, not an audit finding.
 
 ## Status
 
@@ -16,6 +17,7 @@ closing it.
 | 2 — Rate limiting | F4 | `fix/security-rate-limiting` | [#6](https://github.com/thiagosoeiro/AppLock/pull/6) | green (`8f790a9`) | LGTM | `fa1e06b` |
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
 | 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`cafddd4`) | 3 rounds | `9e2387c` |
+| 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | pending | pending | pending | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -203,6 +205,37 @@ merged as `9e2387c`.
   and device admin still blocks uninstall and still locks from the admin callbacks. The fix, if it
   is ever worth it: also clear the window when the screen turns off, which our own lock causes at
   once, so only the duplicates arriving before the screen is off are swallowed.
+
+## Chunk 5 — Interrupted biometric prompt
+
+Not from the audit. On 2026-09-16 a locked app showed its lock screen for a moment and then opened,
+and after that every locked app opened without authentication until the screen went off. The bug
+came in with the auto-prompt (`64fbb7d`). One commit per change.
+
+- **Why it failed.** The log showed the same sequence twice:
+  - the lock screen opened and raised the fingerprint prompt, which took the lock screen down once
+    it was on screen;
+  - about 0.9 s later the app opened its next screen over the prompt, and Android cancelled it;
+  - the biometric library passes errors on only while the prompt's activity is started, so the
+    fallback to the lock screen never ran. While the activity lived, the service believed an
+    authentication was still in flight and skipped every locked app without a log line;
+  - once Android destroyed the activity, that was cleared but the lock screen flag was not, so
+    every locked app was skipped as "lock screen already shown" until the screen went off.
+
+  Pressing Home, opening Recents or taking a call over the prompt leaves it the same way.
+- **Release** (`e518cb6`). A prompt that leaves the screen without an answer clears the in-flight
+  state, cancels itself, finishes, and, if it had taken the lock screen down, clears the flag and
+  tells the service. That covers onStop, a destroy that skipped onStop, and an error while not
+  resumed. Success and the hand-back to the lock screen settle the session first, so they are
+  unchanged, and config changes are skipped.
+- **Re-prompt once** (`4dd2f8c`). The returning lock screen raises the prompt again. Once the same
+  app's prompt has been interrupted twice with gaps under 10 s, its lock screen waits for a tap on
+  the fingerprint icon or the PIN, so an app that keeps covering the prompt can't loop it.
+- **Check again** (`3daf5ab`). 300 ms after an unanswered prompt, the app in front is checked again
+  if it is the one the prompt was for, or one skipped while the prompt was up, so an app that sits
+  still is locked without waiting for its next event. The wait lets Home or Recents report the
+  launcher first.
+- **Phone test:** pending.
 
 ## Testing chunks 2 and 3
 
