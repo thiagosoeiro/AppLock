@@ -284,6 +284,14 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   by Home, Recents, another app or the screen going off, the lock screen is taken down and the
   prompt counts as one that went away unanswered. After Back the activity isn't stopped, so the lock
   screen stays. The watch ends early once the lock screen is unlocked or closed.
+- **Sixth phone test** (2026-09-16, same phone):
+  - Home on the prompt, six times: each time the activity stopped 0.86–0.95 s after the cancel, the
+    lock screen was taken down, and the app locked again when reopened.
+  - Home twice within 10 s, done twice: the next lock screen waited for a tap both times.
+  - Back on the prompt: the activity was not stopped, and the lock screen stayed.
+  - Power button: both times the screen went off, a cancel had already put the lock screen back
+    3–17 s earlier, so it stayed over the phone's own lock screen. That is the older screen-off
+    behaviour, not the prompt.
 
 ## Testing chunks 2 and 3
 
