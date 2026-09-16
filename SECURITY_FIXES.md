@@ -300,6 +300,15 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   - `442a865`: Back and the back gesture did nothing on the lock screen. The key reached its window
     unhandled, because the lock screen's back handler only hears from an activity. The window now
     passes Back on, so it closes the lock screen like the close button (Android 9 and later).
+- **Seventh phone test** (2026-09-16, same phone):
+  - Power button on the prompt, on two apps: the lock screen came down 0.4 s after the cancel and
+    before the screen went off; each app locked again once the phone was unlocked.
+  - Back gesture on the lock screen, twice: it closed 0.2 s later, like the close button.
+  - Home on the prompt still takes the lock screen down, and two in 10 s still make the next one wait
+    for a tap. An app covering its own prompt was handled as before.
+  - Not reached: the lock screen up for more than 3 s when the screen goes off. Both times power was
+    pressed on a returned lock screen, it was within 3 s of the cancel, so the watch took it down
+    first.
 
 ## Testing chunks 2 and 3
 
