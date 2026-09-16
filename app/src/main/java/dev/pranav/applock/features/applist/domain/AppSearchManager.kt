@@ -6,65 +6,63 @@ import android.content.pm.LauncherApps
 import android.os.Process
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.text.Collator
 
 class AppSearchManager(private val context: Context) {
 
-    private var allApps: List<ApplicationInfo> = emptyList()
-    private var appNameCache: HashMap<ApplicationInfo, String> = HashMap()
-    private var prefixIndexCache: HashMap<String, List<ApplicationInfo>> = HashMap()
+    /**
+     * Orders names the way the current language does, so "eBay" sits with the E's and "Álbum" with
+     * the A's. Comparing the strings directly puts both after Z.
+     */
+    val labelOrder: Comparator<InstalledApp> =
+        Collator.getInstance(context.resources.configuration.locales[0]).let { collator ->
+            Comparator { a, b -> collator.compare(a.label, b.label) }
+        }
 
-    suspend fun loadApps(includeSystemApps: Boolean = false): Set<ApplicationInfo> {
+    /**
+     * Every installed app, sorted. This is the expensive one: it reads the name of every package on
+     * the phone, several hundred of them, so it runs off the main thread and nothing that has to be
+     * drawn first should wait for it.
+     */
+    suspend fun loadApps(includeSystemApps: Boolean = false): List<InstalledApp> {
         return withContext(Dispatchers.IO) {
-            val launcherApps =
-                context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-
             val apps = if (includeSystemApps) {
                 // Load all apps including system apps
-                val pm = context.packageManager
-                pm.getInstalledApplications(0)
+                context.packageManager.getInstalledApplications(0)
                     .filter { it.packageName != context.packageName }
             } else {
                 // Load only user-installed apps with launcher activities
+                val launcherApps =
+                    context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
                 launcherApps.getActivityList(null, Process.myUserHandle())
                     .mapNotNull { it.applicationInfo }
                     .filter { it.enabled && it.packageName != context.packageName }
             }
 
-            val nameCache =
-                apps.associateWithTo(HashMap()) { app ->
-                    app.loadLabel(context.packageManager).toString().lowercase()
-                }
-
-            val prefixCache = HashMap<String, MutableList<ApplicationInfo>>()
-
-            nameCache.forEach { (app, appName) ->
-                if (appName.isNotEmpty()) {
-                    val firstChar = appName.take(1)
-                    prefixCache.getOrPut(firstChar) { mutableListOf() }.add(app)
-
-                    if (appName.length >= 2) {
-                        val firstTwoChars = appName.take(2)
-                        prefixCache.getOrPut(firstTwoChars) { mutableListOf() }.add(app)
-
-                        if (appName.length >= 3) {
-                            val firstThreeChars = appName.take(3)
-                            prefixCache.getOrPut(firstThreeChars) { mutableListOf() }.add(app)
-                        }
-                    }
-                }
-            }
-
-            val sortedApps = apps.sortedBy { nameCache[it] }
-
-            allApps = sortedApps
-            appNameCache = nameCache
-            val finalPrefixCache = HashMap<String, List<ApplicationInfo>>(prefixCache.size)
-            prefixCache.forEach { (prefix, appList) ->
-                finalPrefixCache[prefix] = appList
-            }
-            prefixIndexCache = finalPrefixCache
-
-            sortedApps.distinctBy { it.packageName }.toSet()
+            apps.distinctBy { it.packageName }
+                .map { it.toInstalledApp() }
+                .sortedWith(labelOrder)
         }
     }
+
+    /**
+     * Only the apps named, sorted, for the protected list on the main screen. Asking for a handful
+     * of packages by name costs a fraction of loading every package to then throw almost all of
+     * them away. A name that is no longer installed is skipped, as the full list skipped it too.
+     */
+    suspend fun loadApps(packageNames: Set<String>): List<InstalledApp> {
+        return withContext(Dispatchers.IO) {
+            packageNames
+                .filter { it != context.packageName }
+                .mapNotNull { packageName ->
+                    runCatching {
+                        context.packageManager.getApplicationInfo(packageName, 0).toInstalledApp()
+                    }.getOrNull()
+                }
+                .sortedWith(labelOrder)
+        }
+    }
+
+    private fun ApplicationInfo.toInstalledApp() =
+        InstalledApp(this, loadLabel(context.packageManager).toString())
 }

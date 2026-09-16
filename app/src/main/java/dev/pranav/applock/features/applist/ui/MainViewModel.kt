@@ -1,109 +1,102 @@
 package dev.pranav.applock.features.applist.ui
 
 import android.app.Application
-import android.content.pm.ApplicationInfo
 import android.os.SystemClock
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.pranav.applock.core.utils.LogUtils
 import dev.pranav.applock.data.repository.AppLockRepository
 import dev.pranav.applock.features.applist.domain.AppSearchManager
+import dev.pranav.applock.features.applist.domain.InstalledApp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
-@OptIn(FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val appSearchManager = AppSearchManager(application)
     private val appLockRepository = AppLockRepository(application)
 
     private val createdAt = SystemClock.elapsedRealtime()
 
-    private val _isLoading = MutableStateFlow(true)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    private val _lockedPackages = MutableStateFlow(appLockRepository.getLockedApps())
 
-    private val _allApps = MutableStateFlow<Set<ApplicationInfo>>(emptySet())
+    /**
+     * The apps to draw, by package name. The protected ones land here first, on their own, so the
+     * screen can be drawn without waiting for every package on the phone; the full list is merged
+     * in when it arrives. Null until even the protected apps are ready.
+     */
+    private val _entriesByPackage = MutableStateFlow<Map<String, InstalledApp>?>(null)
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    /** Every installed app, sorted, for the "+" sheet. Null until the background load finishes. */
+    private val _allApps = MutableStateFlow<List<InstalledApp>?>(null)
 
-    private val _lockedApps = MutableStateFlow<Set<String>>(emptySet())
-
-    private val _debouncedQuery = MutableStateFlow("")
-
-    val lockedAppsFlow: StateFlow<List<ApplicationInfo>> =
-        combine(_allApps, _lockedApps, _debouncedQuery) { apps, locked, query ->
-            apps.filter { it.packageName in locked }
-                .filter { it.matchesQuery(query) }
-                .sortedBy { it.loadLabel(getApplication<Application>().packageManager).toString() }
-        }.stateIn(
+    /**
+     * The protected apps. Null means still loading, which keeps the "no protected apps" empty state
+     * from flashing between the spinner and the list.
+     */
+    val lockedAppsFlow: StateFlow<List<InstalledApp>?> =
+        combine(_entriesByPackage, _lockedPackages) { entries, locked ->
+            entries?.let { byPackage ->
+                locked.mapNotNull(byPackage::get).sortedWith(appSearchManager.labelOrder)
+            }
+        }.flowOn(Dispatchers.Default).stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = emptyList()
+            initialValue = null
         )
 
-    val unlockedAppsFlow: StateFlow<List<ApplicationInfo>> =
-        combine(_allApps, _lockedApps, _debouncedQuery) { apps, locked, query ->
-            apps.filterNot { it.packageName in locked }
-                .filter { it.matchesQuery(query) }
-                .sortedBy { it.loadLabel(getApplication<Application>().packageManager).toString() }
-        }.stateIn(
+    /**
+     * The apps that can still be protected, for the "+" sheet. Null while the full list is loading.
+     * The list arrives sorted, so this only filters.
+     */
+    val unlockedAppsFlow: StateFlow<List<InstalledApp>?> =
+        combine(_allApps, _lockedPackages) { apps, locked ->
+            apps?.filterNot { it.packageName in locked }
+        }.flowOn(Dispatchers.Default).stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = emptyList()
+            initialValue = null
         )
-
-    private fun ApplicationInfo.matchesQuery(query: String): Boolean {
-        if (query.isBlank()) return true
-        return loadLabel(getApplication<Application>().packageManager).toString()
-            .contains(query, ignoreCase = true)
-    }
 
     init {
-        loadAllApplications()
-        loadLockedApps()
-
-        viewModelScope.launch {
-            _searchQuery
-                .debounce(100L)
-                .collect { query ->
-                    _debouncedQuery.value = query
-                }
-        }
+        loadApplications()
     }
 
-    private fun loadAllApplications() {
+    private fun loadApplications() {
         viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val apps = withContext(Dispatchers.IO) {
-                    appSearchManager.loadApps(true)
-                }
-                _allApps.value = apps
-                logReadyTimes(apps)
+            // The protected apps first, by name, so the main screen can be drawn right away.
+            val lockedByPackage = try {
+                appSearchManager.loadApps(_lockedPackages.value).associateBy { it.packageName }
             } catch (e: Exception) {
-                e.printStackTrace()
-                _allApps.value = emptySet()
-            } finally {
-                _isLoading.value = false
+                Log.e(TAG, "Failed to load the protected apps", e)
+                emptyMap()
             }
-        }
-    }
+            _entriesByPackage.value = lockedByPackage
+            logReady("Protected apps", lockedByPackage.size, "apps")
 
-    private fun loadLockedApps() {
-        _lockedApps.value = appLockRepository.getLockedApps()
+            // Then every package, which only the "+" sheet needs, while the screen is already up.
+            val allApps = try {
+                appSearchManager.loadApps(true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load the installed apps", e)
+                emptyList()
+            }
+            // Keeping the protected entries covers a locked app the full list leaves out.
+            _entriesByPackage.value = lockedByPackage + allApps.associateBy { it.packageName }
+            _allApps.value = allApps
+            logReady("Full app list", allApps.size, "packages")
+        }
     }
 
     fun lockApps(packageNames: List<String>) {
         appLockRepository.addMultipleLockedApps(packageNames.toSet())
-        _lockedApps.value = appLockRepository.getLockedApps()
+        _lockedPackages.value = appLockRepository.getLockedApps()
     }
 
     fun unlockApp(packageName: String) {
         appLockRepository.removeLockedApp(packageName)
-        _lockedApps.value = appLockRepository.getLockedApps()
+        _lockedPackages.value = appLockRepository.getLockedApps()
     }
 
     /**
@@ -111,11 +104,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * protected apps appearing, and the full list behind the "+" button being ready. Written only
      * while Settings → Logging is on, and read from Settings → Export audit logs.
      */
-    private fun logReadyTimes(apps: Set<ApplicationInfo>) {
+    private fun logReady(what: String, count: Int, unit: String) {
         val elapsed = SystemClock.elapsedRealtime() - createdAt
-        val locked = apps.count { it.packageName in _lockedApps.value }
-        LogUtils.d(TAG, "Protected apps ready in $elapsed ms ($locked apps)")
-        LogUtils.d(TAG, "Full app list ready in $elapsed ms (${apps.size} packages)")
+        LogUtils.d(TAG, "$what ready in $elapsed ms ($count $unit)")
     }
 }
 
