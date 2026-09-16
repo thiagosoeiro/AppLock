@@ -3,7 +3,6 @@ package dev.pranav.applock.features.applist.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.provider.Settings
 import android.widget.Toast
@@ -48,6 +47,7 @@ import dev.pranav.applock.core.utils.hasUsagePermission
 import dev.pranav.applock.core.utils.isAccessibilityServiceEnabled
 import dev.pranav.applock.core.utils.openAccessibilitySettings
 import dev.pranav.applock.data.repository.BackendImplementation
+import dev.pranav.applock.features.applist.domain.InstalledApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -65,9 +65,9 @@ fun MainScreen(
     val context = LocalContext.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
-    val isLoading by mainViewModel.isLoading.collectAsState()
+    // Null until the protected apps are ready. The "+" sheet's list is collected inside the sheet,
+    // so this screen never waits for every package on the phone to be read.
     val lockedApps by mainViewModel.lockedAppsFlow.collectAsState()
-    val unlockedApps by mainViewModel.unlockedAppsFlow.collectAsState()
 
     var showAddAppsSheet by remember { mutableStateOf(false) }
 
@@ -193,7 +193,7 @@ fun MainScreen(
             )
         },
         floatingActionButton = {
-            if (!isLoading) {
+            if (lockedApps != null) {
                 FloatingActionButton(
                     onClick = { showAddAppsSheet = true },
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -258,7 +258,8 @@ fun MainScreen(
                     }
                 )
             }
-            if (isLoading) {
+            val protectedApps = lockedApps
+            if (protectedApps == null) {
                 LoadingContent(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -269,7 +270,7 @@ fun MainScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    lockedApps = lockedApps,
+                    lockedApps = protectedApps,
                     onUnlockApp = { appInfo ->
                         mainViewModel.unlockApp(appInfo.packageName)
                     }
@@ -279,6 +280,7 @@ fun MainScreen(
     }
 
     if (showAddAppsSheet) {
+        val unlockedApps by mainViewModel.unlockedAppsFlow.collectAsState()
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val selectedPackages = remember { mutableStateListOf<String>() }
         var bottomSheetSearchQuery by remember { mutableStateOf("") }
@@ -344,8 +346,8 @@ private fun LoadingContent(modifier: Modifier = Modifier) {
 @Composable
 private fun ProtectedAppsDashboard(
     modifier: Modifier = Modifier,
-    lockedApps: List<ApplicationInfo>,
-    onUnlockApp: (ApplicationInfo) -> Unit
+    lockedApps: List<InstalledApp>,
+    onUnlockApp: (InstalledApp) -> Unit
 ) {
     if (lockedApps.isEmpty()) {
         EmptyDashboardState(modifier = modifier)
@@ -398,7 +400,7 @@ private fun EmptyDashboardState(modifier: Modifier = Modifier) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddProtectedAppsSheetContent(
-    unlockedApps: List<ApplicationInfo>,
+    unlockedApps: List<InstalledApp>?,
     searchQuery: String,
     onSearchQueryChanged: (String) -> Unit,
     selectedPackages: List<String>,
@@ -407,24 +409,20 @@ private fun AddProtectedAppsSheetContent(
     onCancel: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
-    val context = LocalContext.current
 
     val filteredApps by produceState(
         initialValue = unlockedApps,
         unlockedApps,
         searchQuery
     ) {
-        value = if (searchQuery.isBlank()) {
-            unlockedApps
+        val apps = unlockedApps
+        value = if (apps == null || searchQuery.isBlank()) {
+            apps
         } else {
             withContext(Dispatchers.Default) {
-                val lowerQuery = searchQuery.lowercase()
-                unlockedApps.filter { appInfo ->
-                    val label = AppIconCache.getLabel(context, appInfo).lowercase()
-                    label.contains(lowerQuery) || appInfo.packageName.contains(
-                        lowerQuery,
-                        ignoreCase = true
-                    )
+                apps.filter { appInfo ->
+                    appInfo.label.contains(searchQuery, ignoreCase = true) ||
+                            appInfo.packageName.contains(searchQuery, ignoreCase = true)
                 }
             }
         }
@@ -493,18 +491,27 @@ private fun AddProtectedAppsSheetContent(
             content = {},
         )
 
-        // List
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(vertical = 8.dp)
-        ) {
-            items(filteredApps, key = { it.packageName }) { appInfo ->
-                val isSelected = selectedPackages.contains(appInfo.packageName)
-                SelectableAppItem(
-                    appInfo = appInfo,
-                    isSelected = isSelected,
-                    onClick = { onToggleSelection(appInfo.packageName) }
-                )
+        // List, or the loading text while the full list of packages is still being read
+        val apps = filteredApps
+        if (apps == null) {
+            LoadingContent(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                items(apps, key = { it.packageName }) { appInfo ->
+                    val isSelected = selectedPackages.contains(appInfo.packageName)
+                    SelectableAppItem(
+                        appInfo = appInfo,
+                        isSelected = isSelected,
+                        onClick = { onToggleSelection(appInfo.packageName) }
+                    )
+                }
             }
         }
     }
@@ -512,32 +519,28 @@ private fun AddProtectedAppsSheetContent(
 
 @Composable
 private fun ProtectedAppItem(
-    appInfo: ApplicationInfo,
+    appInfo: InstalledApp,
     onUnlock: () -> Unit
 ) {
     val context = LocalContext.current
 
-    var appName by remember(appInfo) { mutableStateOf<String?>(null) }
     var icon by remember(appInfo) { mutableStateOf<ImageBitmap?>(null) }
 
     LaunchedEffect(appInfo) {
         withContext(Dispatchers.IO) {
-            appName = AppIconCache.getLabel(context, appInfo)
-            icon = AppIconCache.getIcon(context, appInfo)
+            icon = AppIconCache.getIcon(context, appInfo.info)
         }
     }
 
     ListItem(
         headlineContent = {
-            if (appName != null) {
-                Text(
-                    text = appName!!,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = appInfo.label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         },
         supportingContent = {
             Text(
@@ -561,7 +564,7 @@ private fun ProtectedAppItem(
                     if (icon != null) {
                         Image(
                             bitmap = icon!!,
-                            contentDescription = appName,
+                            contentDescription = appInfo.label,
                             modifier = Modifier.size(32.dp)
                         )
                     }
@@ -574,7 +577,7 @@ private fun ProtectedAppItem(
                     imageVector = Icons.Outlined.LockOpen,
                     contentDescription = stringResource(
                         R.string.main_screen_unlock_app_cd,
-                        appName ?: stringResource(R.string.main_screen_unlock_app_fallback_name)
+                        appInfo.label
                     ),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -592,33 +595,29 @@ private fun ProtectedAppItem(
 
 @Composable
 private fun SelectableAppItem(
-    appInfo: ApplicationInfo,
+    appInfo: InstalledApp,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
 
-    var appName by remember(appInfo) { mutableStateOf<String?>(null) }
     var icon by remember(appInfo) { mutableStateOf<ImageBitmap?>(null) }
 
     LaunchedEffect(appInfo) {
         withContext(Dispatchers.IO) {
-            appName = AppIconCache.getLabel(context, appInfo)
-            icon = AppIconCache.getIcon(context, appInfo)
+            icon = AppIconCache.getIcon(context, appInfo.info)
         }
     }
 
     ListItem(
         headlineContent = {
-            if (appName != null) {
-                Text(
-                    text = appName!!,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = appInfo.label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         },
         supportingContent = {
             Text(
@@ -642,7 +641,7 @@ private fun SelectableAppItem(
                     if (icon != null) {
                         Image(
                             bitmap = icon!!,
-                            contentDescription = appName,
+                            contentDescription = appInfo.label,
                             modifier = Modifier.size(28.dp)
                         )
                     } else {
