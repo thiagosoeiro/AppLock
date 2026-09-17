@@ -9,6 +9,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.database.ContentObserver
+import android.net.Uri
 import android.os.Handler
 import android.os.LocaleList
 import android.os.PowerManager
@@ -109,6 +111,12 @@ class AppLockAccessibilityService : AccessibilityService() {
     // real time, so a clock change doesn't move them; 0 until the first of each is seen.
     private var screenOnAt = 0L
     private var screenOffAt = 0L
+
+    // Watches the phone's own brightness setting; see [logBrightnessChange]. The last values seen,
+    // so only real changes are logged; -1 until the first reading.
+    private var brightnessObserver: ContentObserver? = null
+    private var lastBrightness = -1
+    private var lastBrightnessMode = -1
 
     private var overlayManager: LockScreenOverlayManager? = null
     private lateinit var mainHandler: Handler
@@ -214,6 +222,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 addAction(Intent.ACTION_USER_PRESENT)
             }
             registerReceiver(screenStateReceiver, filter)
+            registerBrightnessObserver()
         } catch (e: Exception) {
             logError("Error in onCreate", e)
         }
@@ -639,6 +648,53 @@ class AppLockAccessibilityService : AccessibilityService() {
 
         val bounce = if (offFor <= SCREEN_BOUNCE_WINDOW_MS) ", straight back on" else ""
         LogUtils.d(TAG, "Screen on after ${asSeconds(offFor)} s off$bounce, $lockState")
+    }
+
+    /**
+     * Watches the phone's brightness setting for a screen that dims and brightens over and over
+     * before it goes off.
+     *
+     * The two causes look the same to the eye and different here. Auto-brightness rewrites this
+     * setting, so a run of changes in the seconds before the screen goes off is the light sensor
+     * hunting. Android's own pre-off dim never touches it - it ramps the display behind the
+     * setting - so a dim that repeats while this stays silent is that ramp being restarted, which
+     * writing the screen timeout does; [ScreenTimeoutByNetwork] says when it wrote one.
+     */
+    private fun registerBrightnessObserver() {
+        val observer = object: ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) = logBrightnessChange()
+        }
+        try {
+            contentResolver.registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS), false, observer
+            )
+            contentResolver.registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS_MODE), false, observer
+            )
+            brightnessObserver = observer
+        } catch (e: Exception) {
+            logError("Could not watch the brightness setting", e)
+        }
+    }
+
+    /** Logs a brightness setting that actually changed, with how long the screen has been on. */
+    private fun logBrightnessChange() {
+        val brightness = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+        val mode = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
+        if (brightness == lastBrightness && mode == lastBrightnessMode) return
+
+        val previous = if (lastBrightness < 0) "first reading" else "was $lastBrightness"
+        val by = when (mode) {
+            Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC -> "automatic"
+            Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL -> "manual"
+            else -> "brightness mode unknown"
+        }
+        val onFor = if (screenOnAt == 0L) "screen on since before this service" else
+            "screen on ${asSeconds(SystemClock.elapsedRealtime() - screenOnAt)} s"
+        lastBrightness = brightness
+        lastBrightnessMode = mode
+
+        LogUtils.d(TAG, "Brightness now $brightness ($previous, $by), $onFor")
     }
 
     /** Android's screen timeout in milliseconds, or -1 when it can't be read. */
@@ -1193,6 +1249,9 @@ class AppLockAccessibilityService : AccessibilityService() {
                 // Ignore if not registered
                 Log.w(TAG, "Receiver not registered or already unregistered")
             }
+
+            brightnessObserver?.let { contentResolver.unregisterContentObserver(it) }
+            brightnessObserver = null
 
             AppLockManager.isLockScreenShown.set(false)
         } catch (e: Exception) {
