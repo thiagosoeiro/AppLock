@@ -12,6 +12,7 @@ import dev.pranav.applock.features.applist.domain.InstalledApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val appSearchManager = AppSearchManager(application)
@@ -67,13 +68,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // The protected apps first, by name, so the main screen can be drawn right away.
             val lockedByPackage = try {
-                appSearchManager.loadApps(_lockedPackages.value).associateBy { it.packageName }
+                val savedNames = withContext(Dispatchers.IO) { appLockRepository.getLockedAppNames() }
+                appSearchManager.loadApps(_lockedPackages.value, savedNames)
+                    .associateBy { it.packageName }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load the protected apps", e)
                 emptyMap()
             }
             _entriesByPackage.value = lockedByPackage
             logReady("Protected apps", lockedByPackage.size, "apps")
+
+            saveNames(lockedByPackage.values)
+            lockedByPackage.values.filterNot { it.isInstalled }.forEach { app ->
+                val shownBy = if (app.label != app.packageName) "its saved name" else "its package name"
+                LogUtils.d(
+                    TAG,
+                    "${app.packageName} is protected but not installed outside Secure Folder, shown by $shownBy"
+                )
+            }
 
             // Then every package, which only the "+" sheet needs, while the screen is already up.
             val allApps = try {
@@ -90,13 +102,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun lockApps(packageNames: List<String>) {
-        appLockRepository.addMultipleLockedApps(packageNames.toSet())
+        val names = packageNames.toSet()
+        appLockRepository.addMultipleLockedApps(names)
+        _allApps.value?.filter { it.packageName in names }?.let(::saveNames)
         _lockedPackages.value = appLockRepository.getLockedApps()
     }
 
     fun unlockApp(packageName: String) {
         appLockRepository.removeLockedApp(packageName)
         _lockedPackages.value = appLockRepository.getLockedApps()
+    }
+
+    /**
+     * Saves the names of the installed apps among [apps]. The list shows a saved name once an app is
+     * left only inside Secure Folder, where its name can't be read.
+     */
+    private fun saveNames(apps: Collection<InstalledApp>) {
+        appLockRepository.saveLockedAppNames(
+            apps.filter { it.isInstalled }.associate { it.packageName to it.label }
+        )
     }
 
     /**

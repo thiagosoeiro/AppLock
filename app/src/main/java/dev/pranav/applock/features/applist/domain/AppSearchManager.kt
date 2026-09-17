@@ -48,16 +48,28 @@ class AppSearchManager(private val context: Context) {
     /**
      * Only the apps named, sorted, for the protected list on the main screen. Asking for a handful
      * of packages by name costs a fraction of loading every package to then throw almost all of
-     * them away. A name that is no longer installed is skipped, as the full list skipped it too.
+     * them away.
+     *
+     * Every name gets an entry. One that isn't installed outside Secure Folder can still lock a copy
+     * inside, which only Secure Folder itself can see, so it is kept as a stand-in labeled with its
+     * name from [savedNames], or its package name when none was saved.
      */
-    suspend fun loadApps(packageNames: Set<String>): List<InstalledApp> {
+    suspend fun loadApps(
+        packageNames: Set<String>,
+        savedNames: Map<String, String>
+    ): List<InstalledApp> {
         return withContext(Dispatchers.IO) {
             packageNames
                 .filter { it != context.packageName }
-                .mapNotNull { packageName ->
+                .map { packageName ->
                     runCatching {
                         context.packageManager.getApplicationInfo(packageName, 0).toInstalledApp()
-                    }.getOrNull()
+                    }.getOrElse {
+                        InstalledApp(
+                            ApplicationInfo().apply { this.packageName = packageName },
+                            savedNames[packageName] ?: packageName
+                        )
+                    }
                 }
                 .sortedWith(labelOrder)
         }

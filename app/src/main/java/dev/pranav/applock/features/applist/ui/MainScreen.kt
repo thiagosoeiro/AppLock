@@ -543,13 +543,25 @@ private fun ProtectedAppItem(
             )
         },
         supportingContent = {
-            Text(
-                text = stringResource(R.string.main_screen_protected_label),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            // Still protected, since a copy inside Secure Folder keeps locking, but nothing to open
+            // outside it. Saying so explains the generic icon and where the lock screen comes from.
+            if (appInfo.isInstalled) {
+                Text(
+                    text = stringResource(R.string.main_screen_protected_label),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.main_screen_not_installed_label),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         },
         leadingContent = {
             Surface(

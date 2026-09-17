@@ -2,12 +2,12 @@
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
 before merging, a fourth after anti-uninstall was beaten on the phone, a fifth after locked apps
-opened freely on the phone, and a sixth after a notification brought up lock screens. The audit's findings table records the status of every finding,
+opened freely on the phone, a sixth after a notification brought up lock screens, and a seventh after a Secure Folder copy kept locking with no row to unprotect it. The audit's findings table records the status of every finding,
 including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it. Chunks 5 and 6 fix bugs found in use, not audit findings.
+closing it. Chunks 5, 6 and 7 fix bugs found in use, not audit findings.
 
 ## Status
 
@@ -19,6 +19,7 @@ closing it. Chunks 5 and 6 fix bugs found in use, not audit findings.
 | 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`cafddd4`) | 3 rounds | `9e2387c` |
 | 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
+| 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -348,6 +349,58 @@ in front locked again too. A test text reproduced it twice.
   - Not confirmed: that the messaging app's lock screen in the test came from tapping its
     notification, and closing the shade with the app kept in front. Not tested: bubbles.
 - **Merged** on 2026-09-16 in PR #24 after the first test.
+
+## Chunk 7 — Secure Folder copy with no row (done)
+
+Not from the audit. On 2026-09-16 a protected app was uninstalled outside Secure Folder. Its row left
+the main screen, but its copy inside Secure Folder still got the lock screen, and nothing was left to
+unprotect it. `FUTURE_IMPROVEMENTS.md` item 18 has the findings and the options weighed.
+
+- **Why it happened.**
+  - The lock list holds package names, and the services check the name alone, so every copy locks.
+  - The main screen built rows only for names `getApplicationInfo(name, 0)` finds, and that sees only
+    apps outside Secure Folder.
+  - Nothing removed an uninstalled app from the list.
+- **Why the copies aren't told apart.** Nothing this app can call without extra permissions sees
+  inside Secure Folder:
+  - Android 16 stopped `MATCH_UNINSTALLED_PACKAGES` from reaching other users.
+  - One UI 8 reportedly makes Secure Folder a hidden private profile.
+
+  So protecting a package still protects every copy, as before. The fix makes that lock visible and
+  keeps the list accurate.
+- **Fix, part 1** (`e2cdd7c`).
+  - Every protected package gets a row. One not installed outside Secure Folder shows its saved name,
+    or its package name, with Android's generic icon and "Not installed outside Secure Folder".
+  - Unprotecting works as before.
+  - Names are saved in their own prefs file, `locked_app_names`, while apps are installed, and
+    dropped on unprotect.
+  - A log line names each such row.
+- **Fix, part 2** (`47d6cb5`).
+  - `PackageRemovedReceiver` handles `ACTION_PACKAGE_FULLY_REMOVED` and reads the hidden extra
+    `REMOVED_FOR_ALL_USERS`. Only true removes the entry.
+  - False, meaning a copy remains, as in Secure Folder, keeps the entry. So does a missing extra.
+  - Each case logs a line, so a lock is never dropped on a guess.
+- **Limits.**
+  - An app installed only inside Secure Folder can't be added from "+". Unprotecting one lasts until
+    it is installed outside again.
+  - A Secure Folder copy uninstalled later sends the main user no broadcast, so its entry stays
+    listed.
+  - Entries left over from before this change stay listed until unprotected.
+- **First phone test** (2026-09-17, Galaxy S24 Ultra, One UI 8.5):
+  - A protected app installed both outside and inside Secure Folder, uninstalled outside only: the log
+    read "Kept … a copy remains in another profile, such as Secure Folder", its row stayed with the
+    name saved while it was installed, and the copy inside Secure Folder still locked and unlocked.
+  - Unprotecting from that row worked, and protecting from "+" still worked.
+  - A second app went the same way and was then taken off the phone entirely: the log read
+    "Removed … uninstalled everywhere" and its row was gone.
+  - The app protected before this change, which has no saved name, showed its package name.
+  - Removing the copy inside Secure Folder logged nothing in the main user, as expected. Android tells
+    only the users an app was removed from.
+  - 25 lock screens across the session, on the apps above and others, with no errors in either log.
+- **Found while testing:** the package installer is itself protected, so its uninstall confirmation
+  brings up the lock screen and authenticating doesn't get the uninstall through. Recorded as item 19
+  in `FUTURE_IMPROVEMENTS.md`; the test used `adb shell pm uninstall` instead.
+- **Merged** on 2026-09-17 in PR #25 after the first test.
 
 ## Testing chunks 2 and 3
 

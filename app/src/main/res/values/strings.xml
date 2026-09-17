@@ -480,6 +480,7 @@ Make sure you have Shizuku installed and enabled via ADB. Tap \'Next\' to grant 
     <string name="main_screen_select_apps_title">Select Apps</string>
     <string name="main_screen_protect_button">Protect (%1$d)</string>
     <string name="main_screen_protected_label">Protected</string>
+    <string name="main_screen_not_installed_label">Not installed outside Secure Folder</string>
     <string name="main_screen_unlock_app_cd">Unlock %1$s</string>
     <string name="main_screen_unlock_app_fallback_name">app</string>
     <string name="main_screen_warning_cd">Warning</string>

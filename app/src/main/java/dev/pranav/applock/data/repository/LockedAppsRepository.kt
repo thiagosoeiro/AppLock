@@ -13,6 +13,15 @@ class LockedAppsRepository(context: Context) {
     private val preferences: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    /**
+     * The names of protected apps by package name, saved while they are installed. An app can be
+     * uninstalled outside Secure Folder while its copy inside keeps locking, and from then on this is
+     * the only place its name can be read. A file of its own keeps package names from becoming keys
+     * among the settings in [PREFS_NAME].
+     */
+    private val appNames: SharedPreferences =
+        context.getSharedPreferences(APP_NAMES_PREFS_NAME, Context.MODE_PRIVATE)
+
     // Locked Apps Management
     fun getLockedApps(): Set<String> {
         return preferences.getStringSet(KEY_LOCKED_APPS, emptySet())?.toSet() ?: emptySet()
@@ -27,6 +36,7 @@ class LockedAppsRepository(context: Context) {
     fun removeLockedApp(packageName: String) {
         val updated = getLockedApps() - packageName
         preferences.edit { putStringSet(KEY_LOCKED_APPS, updated) }
+        appNames.edit { remove(packageName) }
     }
 
     fun isAppLocked(packageName: String): Boolean {
@@ -35,6 +45,22 @@ class LockedAppsRepository(context: Context) {
 
     fun clearAllLockedApps() {
         preferences.edit { putStringSet(KEY_LOCKED_APPS, emptySet()) }
+        appNames.edit { clear() }
+    }
+
+    /** The saved names of protected apps, by package name. */
+    fun getLockedAppNames(): Map<String, String> =
+        appNames.all.mapNotNull { (packageName, name) ->
+            (name as? String)?.let { packageName to it }
+        }.toMap()
+
+    /** Saves [names], by package name, writing only the ones that changed. */
+    fun saveLockedAppNames(names: Map<String, String>) {
+        val changed = names.filter { (packageName, name) ->
+            name.isNotBlank() && appNames.getString(packageName, null) != name
+        }
+        if (changed.isEmpty()) return
+        appNames.edit { changed.forEach { (packageName, name) -> putString(packageName, name) } }
     }
 
     // Trigger Exclusions Management
@@ -97,10 +123,12 @@ class LockedAppsRepository(context: Context) {
     fun removeMultipleLockedApps(packageNames: Set<String>) {
         val updated = getLockedApps() - packageNames
         preferences.edit { putStringSet(KEY_LOCKED_APPS, updated) }
+        appNames.edit { packageNames.forEach { remove(it) } }
     }
 
     companion object {
         private const val PREFS_NAME = "app_lock_prefs"
+        private const val APP_NAMES_PREFS_NAME = "locked_app_names"
         private const val KEY_LOCKED_APPS = "locked_apps"
         private const val KEY_TRIGGER_EXCLUDED_APPS = "trigger_excluded_apps"
         private const val KEY_ANTI_UNINSTALL_APPS = "anti_uninstall_apps"
