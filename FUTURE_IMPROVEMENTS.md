@@ -26,6 +26,7 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 15 | [Spoken warning or alarm](#15-spoken-warning-or-alarm) | Small | Not started |
 | 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#screen-timeout-by-network) |
 | 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#lock-screen-notification-content-by-network) |
+| 18 | [Secure Folder copies of locked apps](#18-secure-folder-copies-of-locked-apps) | Small (list fix) to large (per copy) | Pending decision |
 
 ## Against someone holding the unlocked phone
 
@@ -257,6 +258,107 @@ Unlike item 7, this covers the lock screen only, for every app.
   Shizuku, which the app already uses. The grant survives app updates but not an uninstall.
 - **Check first:** that Android accepts this write from an app targeting SDK 37. Without the
   permission the switch should stay off.
+
+## Secure Folder
+
+### 18. Secure Folder copies of locked apps
+
+**Pending decision.** Found in use on 2026-09-16. Nothing is built yet. The findings, the options
+and the open questions are below.
+
+**The bug.** A protected app is installed both outside and inside Secure Folder:
+
+1. It is uninstalled outside Secure Folder.
+2. Its row leaves the main screen.
+3. The copy inside Secure Folder still gets the lock screen, and there is no row left to unprotect
+   it.
+
+**Cause.** This is in the original code, not a regression from PR #22.
+
+- **The lock list holds package names only** (`LockedAppsRepository`, `locked_apps`). The services
+  check the name alone (`AppLockAccessibilityService.checkAndLockApp`, and the same in the Shizuku
+  and Usage Stats services). Secure Folder's copy has the same name, so both copies lock.
+- **The main screen builds rows only for apps installed outside Secure Folder.**
+  `AppSearchManager.loadApps(packageNames)` calls `getApplicationInfo(name, 0)`, which sees only
+  the main user's apps, and drops any name it can't find. Before PR #22 the list filtered
+  `getInstalledApplications(0)` and dropped the same names.
+- **Nothing ever removes an entry except the unlock icon** (`MainViewModel.unlockApp`). No receiver
+  listens for uninstalls, so an app gone from the whole phone stays in the list, hidden, and locks
+  again if it is reinstalled.
+
+**Can the lock tell the two copies apart?** Checked against the AOSP source:
+
+- **Accessibility service (the backend in use): no.**
+  - `AccessibilityEvent`, `AccessibilityRecord` and `AccessibilityWindowInfo` carry no user, uid
+    or profile.
+  - A window has a task id, but `AccessibilityWindowInfo.getTaskId()` is `@hide`. Turning a task
+    into a user needs privileged access.
+- **Usage Stats: only by guessing.**
+  - `UsageStatsManager.queryEvents` returns only the calling user's events. Another user's events
+    need `INTERACT_ACROSS_USERS_FULL`.
+  - A Secure Folder app never appears there, so a copy could only be told by a missing event. A late
+    or missing event for the copy outside Secure Folder would then let it open unlocked. That fails
+    open.
+- **Shizuku: yes, exactly.**
+  - `IActivityTaskManager.getTasks`, already used by `ShizukuActivityManager.getTasksWrapper`,
+    returns other users' tasks when the caller holds `INTERACT_ACROSS_USERS`, which shell does
+    (AOSP `RunningTasks`).
+  - Each task carries `TaskInfo.userId`, already in the hidden-api stub. On Samsung, Secure Folder
+    is usually user 150 and Dual Messenger user 95.
+  - Shizuku can also list the apps installed inside Secure Folder.
+  - The Shizuku backend reads these tasks but ignores `userId` today, so it locks both copies too.
+  - Without Shizuku running, the safe fallback is locking both copies, as today. Without root,
+    Shizuku usually has to be started again after a reboot.
+
+**Options.**
+
+- **A. List fix, no Shizuku (small).**
+  - Every name in the lock list gets a row. The lookup tries three steps in turn:
+    1. `getApplicationInfo(name, 0)`.
+    2. `getApplicationInfo(name, MATCH_UNINSTALLED_PACKAGES)`. For a caller in the main user with
+       a managed profile, Android widens this to every user, so it should find the Secure Folder
+       copy and its real name.
+    3. A placeholder with the package name and the generic app icon.
+  - A log line names the step that found each app.
+  - Secure Folder copies stay locked until their row is unprotected.
+  - An app gone from both places stays listed by package name until unprotected. A reinstall locks
+    again.
+  - Limit: once unprotected, an app installed only inside Secure Folder can't be added back, because
+    the "+" sheet lists only apps installed outside it.
+- **B. Protect each copy separately, with Shizuku (large).**
+  - The copy outside and the copy inside Secure Folder are separate rows, protected on their own.
+  - The "+" sheet lists Secure Folder apps too, and cleanup can check both places exactly.
+  - It changes the lock path, the list and the saved data.
+- **C. One switch, with Shizuku (medium).** "Lock apps inside Secure Folder", on or off, for every
+  protected app.
+- **D. Leave Secure Folder to its own lock (small).**
+  - Skip locking names that aren't installed outside Secure Folder.
+  - Secure Folder already has a lock that Knox backs, with its own auto-lock setting.
+  - Limit: an app installed in both places still locks in both, because the accessibility service
+    can't tell the copies apart.
+  - Discussed first, then A was preferred.
+
+**Cleanup of apps gone from the whole phone (open).**
+
+- Not in A as planned.
+- **Risk with A:** cleanup would rely on `MATCH_UNINSTALLED_PACKAGES` seeing Secure Folder copies,
+  which is unconfirmed on One UI. If it doesn't, cleanup would remove the lock from an app still
+  inside Secure Folder, and that app couldn't be added back.
+- **Suggested order:** ship A, confirm on the phone that the log names step 2 for the Secure Folder
+  copy, then add cleanup in a second commit and test again.
+- **With Shizuku** (B or C), cleanup can check both places exactly.
+
+**Open questions.**
+
+- Which option: A, B, C or D.
+- Whether to add cleanup, and when.
+- Whether Shizuku stays running on the phone, including after a reboot.
+
+**Check first.**
+
+- **For A:** the log line for a Secure Folder-only app (step 2 or the placeholder).
+- **For B or C:** that `getTasks` through Shizuku reports user 150 for an app opened inside Secure
+  Folder.
 
 ## To check before new features
 
