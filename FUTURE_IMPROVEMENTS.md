@@ -26,7 +26,7 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 15 | [Spoken warning or alarm](#15-spoken-warning-or-alarm) | Small | Not started |
 | 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#screen-timeout-by-network) |
 | 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#lock-screen-notification-content-by-network) |
-| 18 | [Secure Folder copies of locked apps](#18-secure-folder-copies-of-locked-apps) | Small (list fix) to large (per copy) | List fix and cleanup in [PR #25](https://github.com/thiagosoeiro/AppLock/pull/25), chunk 7 in [SECURITY_FIXES.md](SECURITY_FIXES.md) |
+| 18 | [Secure Folder copies of locked apps](#18-secure-folder-copies-of-locked-apps) | Small (list fix) to large (per copy) | Done in [PR #25](https://github.com/thiagosoeiro/AppLock/pull/25), chunk 7 in [SECURITY_FIXES.md](SECURITY_FIXES.md) |
 | 19 | [Uninstall dialog closes behind the lock screen](#19-uninstall-dialog-closes-behind-the-lock-screen) | Small, if the prompt activity is the cause | Pending, found in use 2026-09-17 |
 
 ## Against someone holding the unlocked phone
@@ -307,8 +307,9 @@ Unlike item 7, this covers the lock screen only, for every app.
 
 ### 18. Secure Folder copies of locked apps
 
-**Fixed in PR #25**, chunk 7 of `SECURITY_FIXES.md`, and in phone testing. Found in use on 2026-09-16.
-What shipped is option A without its second lookup step, plus cleanup from the uninstall broadcast.
+**Done.** Found in use on 2026-09-16, fixed in PR #25 and merged on 2026-09-17 after one phone test
+round; chunk 7 of `SECURITY_FIXES.md` has the test. What shipped is option A without its second lookup
+step, plus cleanup from the uninstall broadcast.
 The copies are still not told apart. The findings below stay for options B, C, E and G, if wanted
 later.
 
