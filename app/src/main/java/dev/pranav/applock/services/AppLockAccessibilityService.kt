@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.core.app.LocaleManagerCompat
@@ -137,6 +138,9 @@ class AppLockAccessibilityService : AccessibilityService() {
         // After a prompt goes away unanswered, how long to wait before checking the app in front,
         // so that Home or Recents has reported the launcher by then.
         private const val PROMPT_RECHECK_DELAY_MS = 300L
+
+        // Draws notifications, the notification shade and the status bar.
+        private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
 
         @Volatile
         var isServiceRunning = false
@@ -271,6 +275,15 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Only a change of package can be mistaken for switching apps, so only then is the window looked up.
+        if (packageName != lastForegroundPackage && isFromSystemUiWindow(event)) {
+            LogUtils.d(
+                TAG,
+                "Ignored $packageName (${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}): drawn by System UI, such as its notification"
+            )
+            return
+        }
+
         try {
             processPackageLocking(packageName, event)
         } catch (e: Exception) {
@@ -368,6 +381,31 @@ class AppLockAccessibilityService : AccessibilityService() {
 
         // Skip known recents classes
         return true
+    }
+
+    /**
+     * Whether [event] came from a window System UI draws - a notification popping up or updating, the
+     * notification shade - rather than from the app it names.
+     *
+     * Android builds a notification's views with the context of the app that posted it, so their
+     * events carry that app's package although System UI draws them. Taken at face value, a text
+     * arriving over an unlocked app looks like switching to the messaging app: its lock screen comes
+     * up, and the app in front loses its unlock and locks again after it. The window itself still
+     * belongs to System UI, which its root view shows.
+     *
+     * Only a window that is found, of the system type, with a System UI root counts. Anything
+     * uncertain is taken as the app itself, as before, so a lock is never skipped on a guess. Floating
+     * windows an app draws itself, like chat heads, have that app's root and still count as the app.
+     */
+    private fun isFromSystemUiWindow(event: AccessibilityEvent): Boolean {
+        val window = try {
+            windows.firstOrNull { it.id == event.windowId }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not look up the window of an event", e)
+            null
+        } ?: return false
+        if (window.type != AccessibilityWindowInfo.TYPE_SYSTEM) return false
+        return window.root?.packageName?.toString() == SYSTEM_UI_PACKAGE
     }
 
     private fun processPackageLocking(packageName: String, event: AccessibilityEvent) {
