@@ -16,14 +16,23 @@ object AppIconCache {
     private val iconCache = LruCache<String, ImageBitmap>(MAX_CACHE_SIZE)
 
     fun getIcon(context: Context, appInfo: ApplicationInfo): ImageBitmap? {
-        val cached = iconCache.get(appInfo.packageName)
-        if (cached != null) return cached
-
         // Draw the icon at the size it is shown. Left to itself an adaptive icon rasterizes at its
         // own size, a few hundred pixels square, costing time on every row and memory in the cache.
         val sizePx = (ICON_SIZE_DP * context.resources.displayMetrics.density)
             .toInt()
             .coerceAtLeast(1)
+
+        // An app that isn't installed outside Secure Folder has no icon to read, so it gets Android's
+        // generic one. That isn't cached, so the app's own icon shows again once it is reinstalled.
+        if ((appInfo.flags and ApplicationInfo.FLAG_INSTALLED) == 0) {
+            return context.packageManager.defaultActivityIcon
+                .toBitmap(sizePx, sizePx)
+                .asImageBitmap()
+        }
+
+        val cached = iconCache.get(appInfo.packageName)
+        if (cached != null) return cached
+
         val icon = appInfo.loadIcon(context.packageManager)
             ?.toBitmap(sizePx, sizePx)
             ?.asImageBitmap()

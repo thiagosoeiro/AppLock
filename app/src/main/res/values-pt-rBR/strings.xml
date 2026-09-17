@@ -390,6 +390,7 @@ Verifique se o Shizuku está instalado e ativado via ADB. Toque em \'Próximo\' 
     <string name="main_screen_select_apps_title">Selecionar apps</string>
     <string name="main_screen_protect_button">Proteger (%1$d)</string>
     <string name="main_screen_protected_label">Protegido</string>
+    <string name="main_screen_not_installed_label">Não instalado fora da Pasta Segura</string>
     <string name="main_screen_unlock_app_cd">Desbloquear %1$s</string>
     <string name="main_screen_unlock_app_fallback_name">app</string>
     <string name="main_screen_warning_cd">Aviso</string>

@@ -28,6 +28,10 @@ class AppLockRepository(private val context: Context) {
     fun removeLockedApp(packageName: String) = lockedAppsRepository.removeLockedApp(packageName)
     fun isAppLocked(packageName: String): Boolean = lockedAppsRepository.isAppLocked(packageName)
 
+    fun getLockedAppNames(): Map<String, String> = lockedAppsRepository.getLockedAppNames()
+    fun saveLockedAppNames(names: Map<String, String>) =
+        lockedAppsRepository.saveLockedAppNames(names)
+
     fun getTriggerExcludedApps(): Set<String> = lockedAppsRepository.getTriggerExcludedApps()
     fun addTriggerExcludedApp(packageName: String) =
         lockedAppsRepository.addTriggerExcludedApp(packageName)
