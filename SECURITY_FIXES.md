@@ -18,7 +18,7 @@ closing it. Chunks 5 and 6 fix bugs found in use, not audit findings.
 | 3 — Credential storage | F2, F3 | `fix/security-credential-storage` | [#7](https://github.com/thiagosoeiro/AppLock/pull/7) | green (`1c17e43`) | LGTM | in #7 |
 | 4 — Anti-uninstall lock speed | F9, F12 (part), F18 (narrowed) | `fix/anti-uninstall-lock-speed` | [#13](https://github.com/thiagosoeiro/AppLock/pull/13) | green (`cafddd4`) | 3 rounds | `9e2387c` |
 | 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
-| 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | — | — | — | — |
+| 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -317,7 +317,7 @@ came in with the auto-prompt (`64fbb7d`). One commit per change.
   once the phone is unlocked. With Logging on, the lock screen's window should be removed at
   "Screen off detected" with no "Left the lock screen" line before it.
 
-## Chunk 6 — Notification taken for an app switch (in progress)
+## Chunk 6 — Notification taken for an app switch (done)
 
 Not from the audit. On 2026-09-16 a lock screen came up over an unlocked app while it was in use,
 with nothing touched. It was the lock screen of a messaging app, and once that was unlocked the app
@@ -337,6 +337,17 @@ in front locked again too. A test text reproduced it twice.
   itself, like a chat head, is handled as before, so a lock is never skipped on a guess.
   Anti-uninstall checks run earlier and are unchanged. Notification rows in the pulled-down shade
   come from the same System UI window, so they are ignored too.
+- **First phone test** (2026-09-16, same phone):
+  - A text over an unlocked app logged one "Ignored" line and brought up no lock screen. The app
+    stayed open.
+  - Locked apps still locked when opened, 14 times on four apps, including going straight from one
+    locked app to another. A return from Home within 5 s kept its unlock.
+  - With the shade most likely pulled down, 18 events from a Samsung system component inside the
+    System UI window were ignored. One more, as the screen turned off, was not: it only ended the
+    unlock of the app in front, which screen-off ends anyway, and that component isn't locked.
+  - Not confirmed: that the messaging app's lock screen in the test came from tapping its
+    notification, and closing the shade with the app kept in front. Not tested: bubbles.
+- **Merged** on 2026-09-16 in PR #24 after the first test.
 
 ## Testing chunks 2 and 3
 
