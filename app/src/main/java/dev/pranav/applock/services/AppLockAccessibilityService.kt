@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.LocaleList
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -36,6 +37,7 @@ import dev.pranav.applock.features.lockscreen.ui.startBiometricPrompt
 import dev.pranav.applock.services.AppLockConstants.ACCESSIBILITY_SETTINGS_CLASSES
 import dev.pranav.applock.services.AppLockConstants.EXCLUDED_APPS
 import java.lang.ref.WeakReference
+import java.util.Locale
 import rikka.shizuku.Shizuku
 
 @SuppressLint("AccessibilityPolicy")
@@ -103,6 +105,11 @@ class AppLockAccessibilityService : AccessibilityService() {
     // When a guard last locked the phone; see [isRepeatBlock].
     private var lastBlockAt = 0L
 
+    // When the screen last came on and last went off, for [logScreenOff] and [logScreenOn]. Elapsed
+    // real time, so a clock change doesn't move them; 0 until the first of each is seen.
+    private var screenOnAt = 0L
+    private var screenOffAt = 0L
+
     private var overlayManager: LockScreenOverlayManager? = null
     private lateinit var mainHandler: Handler
 
@@ -135,6 +142,14 @@ class AppLockAccessibilityService : AccessibilityService() {
         // After a guard locks the phone, how long it ignores the same attempt matching again.
         private const val BLOCK_REPEAT_WINDOW_MS = 2_000L
 
+        // How far short of the screen timeout the screen can go off and still count as the timeout
+        // running out: the broadcast arrives a moment after the display is already dark.
+        private const val TIMEOUT_MATCH_TOLERANCE_MS = 2_000L
+
+        // A screen coming back within this of going off went off and straight back on, rather than
+        // being woken by someone picking the phone up.
+        private const val SCREEN_BOUNCE_WINDOW_MS = 2_000L
+
         // After a prompt goes away unanswered, how long to wait before checking the app in front,
         // so that Home or Recents has reported the launcher by then.
         private const val PROMPT_RECHECK_DELAY_MS = 300L
@@ -160,12 +175,14 @@ class AppLockAccessibilityService : AccessibilityService() {
             try {
                 if (intent?.action == Intent.ACTION_SCREEN_OFF) {
                     LogUtils.d(TAG, "Screen off detected. Resetting AppLock state.")
+                    logScreenOff()
                     AppLockManager.isLockScreenShown.set(false)
                     AppLockManager.clearAllUnlockStates()
                     AppLockManager.clearBiometricPromptInterruptions()
                     cancelPromptRecheck()
                     takeDownLockScreenIfPhoneLocked()
                 } else if (intent?.action == Intent.ACTION_SCREEN_ON) {
+                    logScreenOn()
                     // The phone may only have locked after the screen went off.
                     takeDownLockScreenIfPhoneLocked()
                 } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
@@ -563,6 +580,74 @@ class AppLockAccessibilityService : AccessibilityService() {
         pendingPromptRecheck?.let { mainHandler.removeCallbacks(it) }
         pendingPromptRecheck = null
     }
+
+    /**
+     * Says how long the screen had been on when it went off, next to the timeout Android was set to
+     * at that moment. "Screen timeout by network" writes that setting, so this tells a screen that
+     * went dark on its own countdown - and on which value - from one that something turned off.
+     *
+     * Time on screen is the idle time only if the screen was left alone: a touch restarts Android's
+     * countdown and is invisible here, so a screen in use goes off later than this line makes it
+     * look. Short is the telling direction.
+     */
+    private fun logScreenOff() {
+        val now = SystemClock.elapsedRealtime()
+        val timeoutMs = screenOffTimeoutMs()
+        val timeout = if (timeoutMs < 0) "unknown" else "${asSeconds(timeoutMs.toLong())} s"
+        val onFor = if (screenOnAt == 0L) -1L else now - screenOnAt
+        screenOffAt = now
+        screenOnAt = 0L
+
+        if (onFor < 0) {
+            LogUtils.d(TAG, "Screen off; screen timeout $timeout, nothing to measure it against")
+            return
+        }
+
+        val verdict = when {
+            timeoutMs < 0 -> "screen timeout unreadable, can't tell what turned it off"
+            onFor < timeoutMs - TIMEOUT_MATCH_TOLERANCE_MS ->
+                "sooner than the timeout, so the power key or something else turned it off"
+
+            else -> "long enough for the timeout to have run out"
+        }
+        LogUtils.d(
+            TAG,
+            "Screen off ${asSeconds(onFor)} s after it came on, screen timeout $timeout: $verdict"
+        )
+    }
+
+    /**
+     * Says how long the screen was off before it came back, and whether the phone locked meanwhile.
+     * Nothing this service does can turn the display on, so a screen that comes straight back was
+     * woken from outside the app, and the gap tells that apart from someone picking the phone up.
+     */
+    private fun logScreenOn() {
+        val now = SystemClock.elapsedRealtime()
+        val offFor = if (screenOffAt == 0L) -1L else now - screenOffAt
+        screenOnAt = now
+        screenOffAt = 0L
+
+        val lockState = when (getSystemService(KeyguardManager::class.java)?.isDeviceLocked) {
+            true -> "phone locked"
+            false -> "phone unlocked"
+            null -> "lock state unknown"
+        }
+        if (offFor < 0) {
+            LogUtils.d(TAG, "Screen on; no screen off seen to measure from, $lockState")
+            return
+        }
+
+        val bounce = if (offFor <= SCREEN_BOUNCE_WINDOW_MS) ", straight back on" else ""
+        LogUtils.d(TAG, "Screen on after ${asSeconds(offFor)} s off$bounce, $lockState")
+    }
+
+    /** Android's screen timeout in milliseconds, or -1 when it can't be read. */
+    private fun screenOffTimeoutMs(): Int =
+        Settings.System.getInt(contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, -1)
+
+    /** [millis] as seconds to one decimal, with a dot whatever language the phone is in. */
+    private fun asSeconds(millis: Long): String =
+        String.format(Locale.ROOT, "%.1f", millis / 1000.0)
 
     /**
      * Takes the lock screen down once the phone's own secure lock is on. Left up, it would sit over
