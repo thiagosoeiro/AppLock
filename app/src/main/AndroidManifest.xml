@@ -201,6 +201,18 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Takes an app gone from the whole phone off the protected list. Exported so the system
+            can deliver the uninstall broadcast, which only the system is allowed to send.
+        -->
+        <receiver
+            android:name=".core.broadcast.PackageRemovedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
 
         <!--
             Disabled by default; the Automation section in Settings enables the component once
