@@ -103,6 +103,10 @@ class AppLockAccessibilityService : AccessibilityService() {
     // When a guard last locked the phone; see [isRepeatBlock].
     private var lastBlockAt = 0L
 
+    // When a guard last locked the phone over a page that may still be in front, so that the next
+    // unlock leaves it; see [leaveGuardedPageAfterUnlock]. 0 when there is nothing to leave.
+    private var leaveGuardedPageAfter = 0L
+
     private var overlayManager: LockScreenOverlayManager? = null
     private lateinit var mainHandler: Handler
 
@@ -131,6 +135,11 @@ class AppLockAccessibilityService : AccessibilityService() {
 
         // After a guard locks the phone, how long it ignores the same attempt matching again.
         private const val BLOCK_REPEAT_WINDOW_MS = 2_000L
+
+        // How long after a block the next unlock still leaves the page behind, and how soon Home is
+        // sent a second time; see [leaveGuardedPageAfterUnlock].
+        private const val LEAVE_GUARDED_PAGE_WINDOW_MS = 5 * 60 * 1000L
+        private const val LEAVE_GUARDED_PAGE_RETRY_MS = 400L
 
         // After a prompt goes away unanswered, how long to wait before checking the app in front,
         // so that Home or Recents has reported the launcher by then.
@@ -168,6 +177,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
                     // Unlocked: a guard matching from now on is a new attempt, not a repeat.
                     lastBlockAt = 0L
+                    leaveGuardedPageAfterUnlock()
                 }
             } catch (e: Exception) {
                 logError("Error in screenStateReceiver", e)
@@ -939,15 +949,49 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * Sends the phone home once it is unlocked after a guard locked it, so the page that caused the
+     * block is not the first thing back on screen.
+     *
+     * Without this the user is trapped. On the phone, the uninstall dialog for this app survived the
+     * block - the Back sent with it went to our own lock screen, which was over the dialog and holds
+     * focus, and the Home sent after the lock arrived with the screen already off. Every unlock
+     * landed on the dialog again, which the guard matched again: five locks in seventeen seconds.
+     *
+     * Home is sent twice, since the page's window can be restored just after the unlock and take the
+     * screen back; the second one does nothing once the launcher is in front. Only unlocks within
+     * [LEAVE_GUARDED_PAGE_WINDOW_MS] of the block count, so a much later one isn't sent home out of
+     * nowhere.
+     */
+    @SuppressLint("InlinedApi")
+    private fun leaveGuardedPageAfterUnlock() {
+        val blockedAt = leaveGuardedPageAfter
+        leaveGuardedPageAfter = 0L
+        if (blockedAt == 0L) return
+        if (SystemClock.uptimeMillis() - blockedAt > LEAVE_GUARDED_PAGE_WINDOW_MS) return
+
+        LogUtils.d(TAG, "Unlocked after a block: going home, so the page can't lock the phone again")
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        mainHandler.postDelayed(
+            { performGlobalAction(GLOBAL_ACTION_HOME) },
+            LEAVE_GUARDED_PAGE_RETRY_MS
+        )
+    }
+
+    /**
      * Leaves the page and locks the phone. Back comes first, so the page is gone before the lock and
      * unlocking doesn't land on it and lock again. Home waits until after the lock, since stopping
      * the attempt doesn't depend on it.
+     *
+     * Neither is certain to land, though - they are injected key events, and our own lock screen is
+     * over the page whenever the page belongs to a protected app, which is the case for the package
+     * installer's uninstall dialog. So [leaveGuardedPageAfterUnlock] catches what is left.
      */
     @SuppressLint("InlinedApi")
     private fun blockDeactivationAttempt(reason: String) {
         stopGuardedPageChecks()
         if (isRepeatBlock()) return
         try {
+            leaveGuardedPageAfter = SystemClock.uptimeMillis()
             performGlobalAction(GLOBAL_ACTION_BACK)
             PhoneLocker.lockPhone(this, reason)
             performGlobalAction(GLOBAL_ACTION_HOME)
@@ -980,6 +1024,7 @@ class AppLockAccessibilityService : AccessibilityService() {
             if (dpm?.isAdminActive(component) == true) {
                 if (isRepeatBlock()) return
                 // Same order as blockDeactivationAttempt, without the old 100 ms pause before locking.
+                leaveGuardedPageAfter = SystemClock.uptimeMillis()
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 PhoneLocker.lockPhone(this, "device admin page")
                 performGlobalAction(GLOBAL_ACTION_HOME)
