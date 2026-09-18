@@ -3,6 +3,7 @@ package dev.pranav.applock.core.network
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.net.toUri
 import dev.pranav.applock.core.utils.LogUtils
@@ -84,7 +85,15 @@ object ScreenTimeoutByNetwork {
         try {
             Settings.System.putInt(resolver, Settings.System.SCREEN_OFF_TIMEOUT, millis)
             val previous = if (current < 0) "unknown" else "${current / 1000} s"
-            LogUtils.d(TAG, "Screen timeout set to $seconds s, was $previous ($reason)")
+            // Android recounts the time to the screen going off when this changes, and with it the
+            // dim that leads up to it. Written while the screen is on, that shows: a screen part way
+            // through dimming comes back to full and dims again, which looks like a flicker.
+            val whileOn = if (context.getSystemService(PowerManager::class.java)?.isInteractive == true) {
+                ", while the screen was on, so its dim countdown restarts"
+            } else {
+                ""
+            }
+            LogUtils.d(TAG, "Screen timeout set to $seconds s, was $previous ($reason)$whileOn")
         } catch (e: Exception) {
             LogUtils.e(TAG, "Failed to set the screen timeout to $seconds s ($reason)", e)
         }
