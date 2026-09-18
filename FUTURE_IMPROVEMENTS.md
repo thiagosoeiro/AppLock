@@ -212,7 +212,8 @@ A Quick Settings tile that re-locks every app at once, for handing the phone to 
 
 ### 19. Uninstall dialog closes behind the lock screen
 
-**Done.** Found in use on 2026-09-17, fixed in PR #27; chunk 8 of `SECURITY_FIXES.md` has the test.
+**Done.** Found in use on 2026-09-17, fixed in PR #27 and merged on 2026-09-18 before a phone test;
+chunk 8 of `SECURITY_FIXES.md` lists the checks to run on the phone.
 
 **What happened.** The package installer is a protected app, so Android's uninstall confirmation
 brought up the lock screen. Authenticating didn't get the uninstall through: the dialog was gone by
