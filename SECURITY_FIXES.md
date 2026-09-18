@@ -2,12 +2,14 @@
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
 before merging, a fourth after anti-uninstall was beaten on the phone, a fifth after locked apps
-opened freely on the phone, a sixth after a notification brought up lock screens, and a seventh after a Secure Folder copy kept locking with no row to unprotect it. The audit's findings table records the status of every finding,
+opened freely on the phone, a sixth after a notification brought up lock screens, a seventh after a
+Secure Folder copy kept locking with no row to unprotect it, and an eighth after the uninstall dialog
+kept closing behind the lock screen. The audit's findings table records the status of every finding,
 including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it. Chunks 5, 6 and 7 fix bugs found in use, not audit findings.
+closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
 
 ## Status
 
@@ -20,6 +22,7 @@ closing it. Chunks 5, 6 and 7 fix bugs found in use, not audit findings.
 | 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
+| 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -401,6 +404,61 @@ unprotect it. `FUTURE_IMPROVEMENTS.md` item 18 has the findings and the options 
   brings up the lock screen and authenticating doesn't get the uninstall through. Recorded as item 19
   in `FUTURE_IMPROVEMENTS.md`; the test used `adb shell pm uninstall` instead.
 - **Merged** on 2026-09-17 in PR #25 after the first test.
+
+## Chunk 8 — Uninstall dialog closed behind the lock screen (done, phone test pending)
+
+Not from the audit. Found on 2026-09-17 while testing chunk 7. The package installer is a protected
+app, so Android's uninstall confirmation raises the lock screen - and authenticating never got the
+uninstall through. Six attempts in a row ended on the launcher with nothing uninstalled. The only way
+to uninstall anything was to unprotect the installer first. `FUTURE_IMPROVEMENTS.md` item 19.
+
+- **Why it mattered.** The lock was a wall, not a gate. It stopped the owner rather than a thief:
+  unprotecting the installer needs the same PIN the lock would have asked for, and while it is
+  unprotected everything on the phone can be uninstalled with no prompt at all. Every other protected
+  app opens once you authenticate, so the installer looked broken.
+- **Why it happened**, confirmed on the phone before any code: with biometric unlock off, the
+  uninstall goes through after the PIN. The biometric prompt is an activity,
+  `TransparentBiometricActivity`, so it takes the foreground, and the installer finishes its dialog
+  instead of resuming it. The lock screen itself is an overlay window and leaves the dialog in place.
+- **Fix** (`af4ad6b`). A package installer gets the PIN, pattern or password screen on its own.
+  - `AppLockConstants.isPinOnlyApp` matches the installer marker anti-uninstall already uses, which
+    covers every OEM's installer and no ordinary app. The marker moved to `AppLockConstants` so the
+    service and the overlay share one copy.
+  - `AppLockAccessibilityService.showLockScreenOverlay` doesn't raise the prompt for one, and logs
+    that it didn't.
+  - `LockScreenOverlayManager` hides the fingerprint button for one, since tapping it would open the
+    same activity and close the dialog.
+  - The PIN is the stronger factor of the two, so nothing is weakened by dropping the prompt there.
+- **Limits.**
+  - Only the accessibility backend. Shizuku and Usage Stats lock with `PasswordOverlayActivity`, an
+    activity that displaces the dialog by itself.
+  - An installer whose package name doesn't carry the marker keeps the old behaviour.
+  - On a trusted network locked apps open without authentication, so the dialog was never touched
+    there.
+- **First phone test** (2026-09-18, Galaxy S24 Ultra, One UI 8.5). The gate works.
+  - Two apps uninstalled through it. Each time the PIN screen came up with no prompt and no
+    fingerprint button ("gets the PIN alone" in the log), the dialog was still there after the PIN,
+    and the uninstall went through.
+  - A protected app that isn't the installer still auto-raised the prompt, so the lock path is
+    unchanged for everything else.
+  - **A loop turned up in anti-uninstall**, on this app's own uninstall dialog: the guard locked the
+    phone, every unlock landed on the dialog again, and the guard locked again - five locks in
+    seventeen seconds, with no way out but to race it.
+- **Why the loop.** The Back and Home a block sends are injected key events. Back went to our own
+  lock screen, which sits over the dialog since the installer is protected and which holds focus;
+  Home arrived after `lockNow`, with the screen already off. So the dialog survived the block. Until
+  the fix above, the biometric prompt activity had been destroying the dialog on its way in, which
+  hid this. Nothing could be uninstalled through it: our lock screen is back over the dialog within
+  about 10 ms of each unlock.
+- **Fix, part 2** (`67ce8dc`). A block remembers it happened, and the next unlock within five
+  minutes sends Home - twice, since the page's window can be restored just after the unlock. The
+  lock itself is untouched and still immediate. It covers the device admin page and the App info
+  page as well, which can be trapped the same way.
+- **Second phone test.** Not run before merging, at the owner's call. What to check: uninstall this
+  app, let the guard lock the phone, unlock it, and land on the launcher rather than on the dialog -
+  the log should read "Unlocked after a block: going home" with no second lock. Worth re-running the
+  gate itself too, since the guard path changed.
+- **Merged** on 2026-09-18 in PR #27 with CI green.
 
 ## Testing chunks 2 and 3
 

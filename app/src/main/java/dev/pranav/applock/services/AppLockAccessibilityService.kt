@@ -118,6 +118,10 @@ class AppLockAccessibilityService : AccessibilityService() {
     private var lastBrightness = -1
     private var lastBrightnessMode = -1
 
+    // When a guard last locked the phone over a page that may still be in front, so that the next
+    // unlock leaves it; see [leaveGuardedPageAfterUnlock]. 0 when there is nothing to leave.
+    private var leaveGuardedPageAfter = 0L
+
     private var overlayManager: LockScreenOverlayManager? = null
     private lateinit var mainHandler: Handler
 
@@ -129,9 +133,6 @@ class AppLockAccessibilityService : AccessibilityService() {
         private const val TAG = "AppLockAccessibility"
         private const val DEVICE_ADMIN_SETTINGS_PACKAGE = "com.android.settings"
         private const val APP_PACKAGE_PREFIX = "dev.pranav.applock"
-
-        // Part of every package installer's package name, which differs between phones.
-        private const val PACKAGE_INSTALLER_MARKER = "packageinstaller"
 
         // After a Settings page opens, how long anti-uninstall keeps checking its content, and how
         // soon after a content change it checks again.
@@ -157,6 +158,11 @@ class AppLockAccessibilityService : AccessibilityService() {
         // A screen coming back within this of going off went off and straight back on, rather than
         // being woken by someone picking the phone up.
         private const val SCREEN_BOUNCE_WINDOW_MS = 2_000L
+
+        // How long after a block the next unlock still leaves the page behind, and how soon Home is
+        // sent a second time; see [leaveGuardedPageAfterUnlock].
+        private const val LEAVE_GUARDED_PAGE_WINDOW_MS = 5 * 60 * 1000L
+        private const val LEAVE_GUARDED_PAGE_RETRY_MS = 400L
 
         // After a prompt goes away unanswered, how long to wait before checking the app in front,
         // so that Home or Recents has reported the launcher by then.
@@ -196,6 +202,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                 } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
                     // Unlocked: a guard matching from now on is a new attempt, not a repeat.
                     lastBlockAt = 0L
+                    leaveGuardedPageAfterUnlock()
                 }
             } catch (e: Exception) {
                 logError("Error in screenStateReceiver", e)
@@ -762,7 +769,12 @@ class AppLockAccessibilityService : AccessibilityService() {
             // The overlay is up first and stays up until the prompt is on screen, so the locked
             // app is never briefly visible behind it.
             if (autoPromptBiometrics && canPromptBiometrics()) {
-                if (AppLockManager.shouldAutoPromptBiometrics(packageName)) {
+                if (AppLockConstants.isPinOnlyApp(packageName)) {
+                    LogUtils.d(
+                        TAG,
+                        "Lock screen for $packageName gets the PIN alone: a prompt would close its dialog"
+                    )
+                } else if (AppLockManager.shouldAutoPromptBiometrics(packageName)) {
                     LogUtils.d(TAG, "Auto-prompting biometrics for: $packageName")
                     startBiometricPrompt(packageName, triggeringPackage)
                 } else {
@@ -831,7 +843,7 @@ class AppLockAccessibilityService : AccessibilityService() {
     // the uninstall dialog.
     private fun isGuardedPackage(packageName: CharSequence?): Boolean =
         packageName == DEVICE_ADMIN_SETTINGS_PACKAGE ||
-                packageName?.contains(PACKAGE_INSTALLER_MARKER) == true
+                packageName?.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER) == true
 
     private fun checkForDeviceAdminDeactivation(event: AccessibilityEvent) {
         val packageName = event.packageName?.toString() ?: return
@@ -865,9 +877,9 @@ class AppLockAccessibilityService : AccessibilityService() {
         guardedPageDescribed = false
         val labels = ownLabels
         val showsOurName = event.text.any { it.containsAnyOf(labels) }
-        if (packageName.contains(PACKAGE_INSTALLER_MARKER)) {
+        if (packageName.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER)) {
             val now = SystemClock.uptimeMillis()
-            if (className.contains(PACKAGE_INSTALLER_MARKER)) {
+            if (className.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER)) {
                 installerUninstallScreenAt =
                     if (className.contains("Uninstall", ignoreCase = true)) now else 0L
             }
@@ -997,7 +1009,7 @@ class AppLockAccessibilityService : AccessibilityService() {
      * it used.
      */
     private fun isOwnUninstallDialog(packageName: String): Boolean {
-        if (!packageName.contains(PACKAGE_INSTALLER_MARKER)) return false
+        if (!packageName.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER)) return false
         val now = SystemClock.uptimeMillis()
         return isRecent(installerUninstallScreenAt, now) && isRecent(installerOurNameAt, now)
     }
@@ -1078,15 +1090,49 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * Sends the phone home once it is unlocked after a guard locked it, so the page that caused the
+     * block is not the first thing back on screen.
+     *
+     * Without this the user is trapped. On the phone, the uninstall dialog for this app survived the
+     * block - the Back sent with it went to our own lock screen, which was over the dialog and holds
+     * focus, and the Home sent after the lock arrived with the screen already off. Every unlock
+     * landed on the dialog again, which the guard matched again: five locks in seventeen seconds.
+     *
+     * Home is sent twice, since the page's window can be restored just after the unlock and take the
+     * screen back; the second one does nothing once the launcher is in front. Only unlocks within
+     * [LEAVE_GUARDED_PAGE_WINDOW_MS] of the block count, so a much later one isn't sent home out of
+     * nowhere.
+     */
+    @SuppressLint("InlinedApi")
+    private fun leaveGuardedPageAfterUnlock() {
+        val blockedAt = leaveGuardedPageAfter
+        leaveGuardedPageAfter = 0L
+        if (blockedAt == 0L) return
+        if (SystemClock.uptimeMillis() - blockedAt > LEAVE_GUARDED_PAGE_WINDOW_MS) return
+
+        LogUtils.d(TAG, "Unlocked after a block: going home, so the page can't lock the phone again")
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        mainHandler.postDelayed(
+            { performGlobalAction(GLOBAL_ACTION_HOME) },
+            LEAVE_GUARDED_PAGE_RETRY_MS
+        )
+    }
+
+    /**
      * Leaves the page and locks the phone. Back comes first, so the page is gone before the lock and
      * unlocking doesn't land on it and lock again. Home waits until after the lock, since stopping
      * the attempt doesn't depend on it.
+     *
+     * Neither is certain to land, though - they are injected key events, and our own lock screen is
+     * over the page whenever the page belongs to a protected app, which is the case for the package
+     * installer's uninstall dialog. So [leaveGuardedPageAfterUnlock] catches what is left.
      */
     @SuppressLint("InlinedApi")
     private fun blockDeactivationAttempt(reason: String) {
         stopGuardedPageChecks()
         if (isRepeatBlock()) return
         try {
+            leaveGuardedPageAfter = SystemClock.uptimeMillis()
             performGlobalAction(GLOBAL_ACTION_BACK)
             PhoneLocker.lockPhone(this, reason)
             performGlobalAction(GLOBAL_ACTION_HOME)
@@ -1119,6 +1165,7 @@ class AppLockAccessibilityService : AccessibilityService() {
             if (dpm?.isAdminActive(component) == true) {
                 if (isRepeatBlock()) return
                 // Same order as blockDeactivationAttempt, without the old 100 ms pause before locking.
+                leaveGuardedPageAfter = SystemClock.uptimeMillis()
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 PhoneLocker.lockPhone(this, "device admin page")
                 performGlobalAction(GLOBAL_ACTION_HOME)

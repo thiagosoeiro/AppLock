@@ -45,6 +45,25 @@ object AppLockConstants {
         "com.samsung.knox.securefolder"
     )
 
+    // Part of every package installer's package name, which differs between phones.
+    const val PACKAGE_INSTALLER_MARKER = "packageinstaller"
+
+    /**
+     * Whether [packageName] gets the PIN, pattern or password screen on its own, with no biometric
+     * prompt and no fingerprint button.
+     *
+     * The prompt is an activity, [dev.pranav.applock.features.lockscreen.ui.TransparentBiometricActivity],
+     * so it takes the foreground. The package installer then finishes its uninstall dialog instead
+     * of resuming it, and answering the prompt lands on the launcher with nothing uninstalled - the
+     * lock is a wall rather than a gate (FUTURE_IMPROVEMENTS item 19). The lock screen itself is an
+     * overlay window, which leaves the dialog in place, so the PIN alone gets the user through.
+     *
+     * The marker matches every OEM's installer and no ordinary app; the Play Store
+     * ("com.android.vending") is not one of these.
+     */
+    fun isPinOnlyApp(packageName: String): Boolean =
+        packageName.contains(PACKAGE_INSTALLER_MARKER)
+
     val ACCESSIBILITY_SETTINGS_CLASSES = setOf(
         "com.android.settings.accessibility.AccessibilitySettings",
         "com.android.settings.accessibility.AccessibilityMenuActivity",
