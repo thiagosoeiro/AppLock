@@ -115,9 +115,6 @@ class AppLockAccessibilityService : AccessibilityService() {
         private const val DEVICE_ADMIN_SETTINGS_PACKAGE = "com.android.settings"
         private const val APP_PACKAGE_PREFIX = "dev.pranav.applock"
 
-        // Part of every package installer's package name, which differs between phones.
-        private const val PACKAGE_INSTALLER_MARKER = "packageinstaller"
-
         // After a Settings page opens, how long anti-uninstall keeps checking its content, and how
         // soon after a content change it checks again.
         private const val GUARDED_PAGE_CHECK_WINDOW_MS = 1_000L
@@ -621,7 +618,12 @@ class AppLockAccessibilityService : AccessibilityService() {
             // The overlay is up first and stays up until the prompt is on screen, so the locked
             // app is never briefly visible behind it.
             if (autoPromptBiometrics && canPromptBiometrics()) {
-                if (AppLockManager.shouldAutoPromptBiometrics(packageName)) {
+                if (AppLockConstants.isPinOnlyApp(packageName)) {
+                    LogUtils.d(
+                        TAG,
+                        "Lock screen for $packageName gets the PIN alone: a prompt would close its dialog"
+                    )
+                } else if (AppLockManager.shouldAutoPromptBiometrics(packageName)) {
                     LogUtils.d(TAG, "Auto-prompting biometrics for: $packageName")
                     startBiometricPrompt(packageName, triggeringPackage)
                 } else {
@@ -690,7 +692,7 @@ class AppLockAccessibilityService : AccessibilityService() {
     // the uninstall dialog.
     private fun isGuardedPackage(packageName: CharSequence?): Boolean =
         packageName == DEVICE_ADMIN_SETTINGS_PACKAGE ||
-                packageName?.contains(PACKAGE_INSTALLER_MARKER) == true
+                packageName?.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER) == true
 
     private fun checkForDeviceAdminDeactivation(event: AccessibilityEvent) {
         val packageName = event.packageName?.toString() ?: return
@@ -724,9 +726,9 @@ class AppLockAccessibilityService : AccessibilityService() {
         guardedPageDescribed = false
         val labels = ownLabels
         val showsOurName = event.text.any { it.containsAnyOf(labels) }
-        if (packageName.contains(PACKAGE_INSTALLER_MARKER)) {
+        if (packageName.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER)) {
             val now = SystemClock.uptimeMillis()
-            if (className.contains(PACKAGE_INSTALLER_MARKER)) {
+            if (className.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER)) {
                 installerUninstallScreenAt =
                     if (className.contains("Uninstall", ignoreCase = true)) now else 0L
             }
@@ -856,7 +858,7 @@ class AppLockAccessibilityService : AccessibilityService() {
      * it used.
      */
     private fun isOwnUninstallDialog(packageName: String): Boolean {
-        if (!packageName.contains(PACKAGE_INSTALLER_MARKER)) return false
+        if (!packageName.contains(AppLockConstants.PACKAGE_INSTALLER_MARKER)) return false
         val now = SystemClock.uptimeMillis()
         return isRecent(installerUninstallScreenAt, now) && isRecent(installerOurNameAt, now)
     }
