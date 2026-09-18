@@ -22,7 +22,7 @@ closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
 | 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
-| 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`6835d37`) | not yet | 2026-09-18 |
+| 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`6835d37`) | 1 round, 1 fix | open |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -405,7 +405,7 @@ unprotect it. `FUTURE_IMPROVEMENTS.md` item 18 has the findings and the options 
   in `FUTURE_IMPROVEMENTS.md`; the test used `adb shell pm uninstall` instead.
 - **Merged** on 2026-09-17 in PR #25 after the first test.
 
-## Chunk 8 — Uninstall dialog closed behind the lock screen (done, phone test pending)
+## Chunk 8 — Uninstall dialog closed behind the lock screen
 
 Not from the audit. Found on 2026-09-17 while testing chunk 7. The package installer is a protected
 app, so Android's uninstall confirmation raises the lock screen - and authenticating never got the
@@ -435,17 +435,26 @@ to uninstall anything was to unprotect the installer first. `FUTURE_IMPROVEMENTS
   - An installer whose package name doesn't carry the marker keeps the old behaviour.
   - On a trusted network locked apps open without authentication, so the dialog was never touched
     there.
-- **Phone test.** Not run before merging. With biometric unlock on, Settings → Logging on:
-  - Settings → App info on a throwaway app → Uninstall. The PIN screen comes up with no fingerprint
-    button and no prompt, the log has "gets the PIN alone", and after the PIN the dialog is still
-    there and uninstalls the app.
-  - The same from a long-press on that app's launcher icon → Uninstall.
-  - Opening an APK, so the install dialog comes up: PIN only, then it installs.
-  - A protected app that is not the installer still raises the prompt by itself and still shows the
-    fingerprint button; cancelling brings the PIN screen back and Back closes it. This is the part
-    chunk 5 took seven rounds on.
-  - This app still can't be uninstalled, and opening its App info page still locks the phone.
-- **Merged** on 2026-09-18 in PR #27 with CI green, before the phone test, at the owner's call.
+- **First phone test** (2026-09-18, Galaxy S24 Ultra, One UI 8.5). The gate works.
+  - Two apps uninstalled through it. Each time the PIN screen came up with no prompt and no
+    fingerprint button ("gets the PIN alone" in the log), the dialog was still there after the PIN,
+    and the uninstall went through.
+  - A protected app that isn't the installer still auto-raised the prompt, so the lock path is
+    unchanged for everything else.
+  - **A loop turned up in anti-uninstall**, on this app's own uninstall dialog: the guard locked the
+    phone, every unlock landed on the dialog again, and the guard locked again - five locks in
+    seventeen seconds, with no way out but to race it.
+- **Why the loop.** The Back and Home a block sends are injected key events. Back went to our own
+  lock screen, which sits over the dialog since the installer is protected and which holds focus;
+  Home arrived after `lockNow`, with the screen already off. So the dialog survived the block. Until
+  the fix above, the biometric prompt activity had been destroying the dialog on its way in, which
+  hid this. Nothing could be uninstalled through it: our lock screen is back over the dialog within
+  about 10 ms of each unlock.
+- **Fix, part 2** (`67ce8dc`). A block remembers it happened, and the next unlock within five
+  minutes sends Home - twice, since the page's window can be restored just after the unlock. The
+  lock itself is untouched and still immediate. It covers the device admin page and the App info
+  page as well, which can be trapped the same way.
+- **Second phone test.** Pending.
 
 ## Testing chunks 2 and 3
 
