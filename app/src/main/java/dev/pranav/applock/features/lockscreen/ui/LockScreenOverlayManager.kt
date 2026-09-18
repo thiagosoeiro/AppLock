@@ -30,6 +30,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dev.pranav.applock.R
 import dev.pranav.applock.core.utils.appLockRepository
 import dev.pranav.applock.data.repository.PreferencesRepository
+import dev.pranav.applock.services.AppLockConstants
 import dev.pranav.applock.services.AppLockManager
 import dev.pranav.applock.ui.theme.AppLockTheme
 
@@ -112,6 +113,13 @@ class LockScreenOverlayManager(private val context: Context):
                                 isValid
                             }
 
+                            // The prompt is an activity, so for these apps it would close the dialog
+                            // the lock screen came up over; see [AppLockConstants.isPinOnlyApp].
+                            // The button goes with it, since it opens that same activity.
+                            val pinOnly = AppLockConstants.isPinOnlyApp(lockedPackageName)
+                            val showBiometricButton =
+                                appLockRepository.isBiometricAuthEnabled() && !pinOnly
+
                             // The overlay deliberately stays up until the prompt is actually on
                             // screen; TransparentBiometricActivity removes it through the host.
                             val onBiometricAuthCallback: () -> Unit = {
@@ -140,13 +148,13 @@ class LockScreenOverlayManager(private val context: Context):
                                         lockedAppName = appName,
                                         triggeringPackageName = triggeringPackageName,
                                         onPatternAttempt = onPatternAttemptCallback,
-                                        onBiometricAuth = onBiometricAuthCallback
+                                        onBiometricAuth = if (pinOnly) null else onBiometricAuthCallback
                                     )
                                 }
 
                                 PreferencesRepository.LOCK_TYPE_PASSWORD -> {
                                     AlphanumericPasswordOverlayScreen(
-                                        showBiometricButton = appLockRepository.isBiometricAuthEnabled(),
+                                        showBiometricButton = showBiometricButton,
                                         fromMainActivity = false,
                                         showCloseButton = true,
                                         onClose = {
@@ -166,7 +174,7 @@ class LockScreenOverlayManager(private val context: Context):
 
                                 else -> {
                                     PinPasswordOverlayScreen(
-                                        showBiometricButton = appLockRepository.isBiometricAuthEnabled(),
+                                        showBiometricButton = showBiometricButton,
                                         fromMainActivity = false,
                                         showCloseButton = true,
                                         onClose = {
