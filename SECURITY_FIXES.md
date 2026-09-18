@@ -2,12 +2,14 @@
 
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
 before merging, a fourth after anti-uninstall was beaten on the phone, a fifth after locked apps
-opened freely on the phone, a sixth after a notification brought up lock screens, and a seventh after a Secure Folder copy kept locking with no row to unprotect it. The audit's findings table records the status of every finding,
+opened freely on the phone, a sixth after a notification brought up lock screens, a seventh after a
+Secure Folder copy kept locking with no row to unprotect it, and an eighth after the uninstall dialog
+kept closing behind the lock screen. The audit's findings table records the status of every finding,
 including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it. Chunks 5, 6 and 7 fix bugs found in use, not audit findings.
+closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
 
 ## Status
 
@@ -20,6 +22,7 @@ closing it. Chunks 5, 6 and 7 fix bugs found in use, not audit findings.
 | 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
+| 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | pending | pending | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -401,6 +404,38 @@ unprotect it. `FUTURE_IMPROVEMENTS.md` item 18 has the findings and the options 
   brings up the lock screen and authenticating doesn't get the uninstall through. Recorded as item 19
   in `FUTURE_IMPROVEMENTS.md`; the test used `adb shell pm uninstall` instead.
 - **Merged** on 2026-09-17 in PR #25 after the first test.
+
+## Chunk 8 — Uninstall dialog closed behind the lock screen
+
+Not from the audit. Found on 2026-09-17 while testing chunk 7. The package installer is a protected
+app, so Android's uninstall confirmation raises the lock screen - and authenticating never got the
+uninstall through. Six attempts in a row ended on the launcher with nothing uninstalled. The only way
+to uninstall anything was to unprotect the installer first. `FUTURE_IMPROVEMENTS.md` item 19.
+
+- **Why it mattered.** The lock was a wall, not a gate. It stopped the owner rather than a thief:
+  unprotecting the installer needs the same PIN the lock would have asked for, and while it is
+  unprotected everything on the phone can be uninstalled with no prompt at all. Every other protected
+  app opens once you authenticate, so the installer looked broken.
+- **Why it happened**, confirmed on the phone before any code: with biometric unlock off, the
+  uninstall goes through after the PIN. The biometric prompt is an activity,
+  `TransparentBiometricActivity`, so it takes the foreground, and the installer finishes its dialog
+  instead of resuming it. The lock screen itself is an overlay window and leaves the dialog in place.
+- **Fix** (`af4ad6b`). A package installer gets the PIN, pattern or password screen on its own.
+  - `AppLockConstants.isPinOnlyApp` matches the installer marker anti-uninstall already uses, which
+    covers every OEM's installer and no ordinary app. The marker moved to `AppLockConstants` so the
+    service and the overlay share one copy.
+  - `AppLockAccessibilityService.showLockScreenOverlay` doesn't raise the prompt for one, and logs
+    that it didn't.
+  - `LockScreenOverlayManager` hides the fingerprint button for one, since tapping it would open the
+    same activity and close the dialog.
+  - The PIN is the stronger factor of the two, so nothing is weakened by dropping the prompt there.
+- **Limits.**
+  - Only the accessibility backend. Shizuku and Usage Stats lock with `PasswordOverlayActivity`, an
+    activity that displaces the dialog by itself.
+  - An installer whose package name doesn't carry the marker keeps the old behaviour.
+  - On a trusted network locked apps open without authentication, so the dialog was never touched
+    there.
+- **Phone test.** Pending.
 
 ## Testing chunks 2 and 3
 

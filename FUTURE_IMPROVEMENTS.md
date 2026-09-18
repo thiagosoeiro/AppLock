@@ -27,7 +27,7 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#screen-timeout-by-network) |
 | 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#lock-screen-notification-content-by-network) |
 | 18 | [Secure Folder copies of locked apps](#18-secure-folder-copies-of-locked-apps) | Small (list fix) to large (per copy) | Done in [PR #25](https://github.com/thiagosoeiro/AppLock/pull/25), chunk 7 in [SECURITY_FIXES.md](SECURITY_FIXES.md) |
-| 19 | [Uninstall dialog closes behind the lock screen](#19-uninstall-dialog-closes-behind-the-lock-screen) | Small, if the prompt activity is the cause | Pending, found in use 2026-09-17 |
+| 19 | [Uninstall dialog closes behind the lock screen](#19-uninstall-dialog-closes-behind-the-lock-screen) | Small | Done in [PR #27](https://github.com/thiagosoeiro/AppLock/pull/27), chunk 8 in [SECURITY_FIXES.md](SECURITY_FIXES.md) |
 
 ## Against someone holding the unlocked phone
 
@@ -212,46 +212,35 @@ A Quick Settings tile that re-locks every app at once, for handing the phone to 
 
 ### 19. Uninstall dialog closes behind the lock screen
 
-**Pending.** Found in use on 2026-09-17. Nothing is built yet.
+**Done.** Found in use on 2026-09-17, fixed in PR #27; chunk 8 of `SECURITY_FIXES.md` has the test.
 
-**What happens.** The package installer is a protected app, so Android's uninstall confirmation brings
-up the lock screen. Authenticating doesn't get the uninstall through: the dialog is gone by the time
-the lock screen closes, and the phone lands on the launcher. Six attempts in a row ended that way in
-the log of 2026-09-17. The only way to uninstall anything today is to unprotect the package installer
-first, which is a wall where the lock is meant to be a gate.
+**What happened.** The package installer is a protected app, so Android's uninstall confirmation
+brought up the lock screen. Authenticating didn't get the uninstall through: the dialog was gone by
+the time the lock screen closed, and the phone landed on the launcher. Six attempts in a row ended
+that way in the log of 2026-09-17. The only way to uninstall anything was to unprotect the package
+installer first, which is a wall where the lock is meant to be a gate.
 
-**Why it probably happens.** In the log the overlay went up at `.007` and the uninstall dialog was
-still sending accessibility events at `.516`. It only disappeared once the prompt was answered. The
-biometric prompt is an activity, `TransparentBiometricActivity`, so it takes the foreground and the
-installer finishes its dialog instead of resuming it. The PIN screen is an overlay window, which
-shouldn't displace anything.
+**The cause, confirmed on the phone before any code was written.** With biometric unlock off, the
+uninstall goes through after the PIN. So it is the biometric prompt: it is an activity,
+`TransparentBiometricActivity`, so it takes the foreground and the installer finishes its dialog
+instead of resuming it. The lock screen itself is an overlay window and leaves the dialog in place -
+in the log the dialog was still sending accessibility events while the overlay was up.
 
-**Check first, about two minutes.** Turn biometric unlock off, start an uninstall, and enter the PIN on
-the overlay. If the uninstall dialog is still there afterwards, the prompt activity is the cause.
+**What shipped.** A package installer gets the PIN, pattern or password screen on its own.
 
-**Fix if that is confirmed (small).**
+- `AppLockConstants.isPinOnlyApp` matches the installer marker anti-uninstall already uses, so it
+  covers every OEM's installer and no ordinary app. The Play Store is not one of them.
+- `AppLockAccessibilityService.showLockScreenOverlay` doesn't raise the prompt for one, and logs why.
+- `LockScreenOverlayManager` hides the fingerprint button for one: it opens the same activity, so
+  leaving it there would be a trap.
+- The PIN is the stronger of the two factors, so nothing is weakened by dropping the prompt there.
 
-- A constant set next to `AppLockConstants.NEUTRAL_SURFACE_APPS` for packages that get the PIN only.
-- `AppLockAccessibilityService.showLockScreenOverlay` skips the auto-prompt for them.
-- The overlay hides its fingerprint button for them, since `LockScreenOverlayManager` sends that
-  button through the same activity.
-- Around 20 to 30 lines, no new strings or permissions, and one phone test round in the lock path,
-  which is the part that took seven rounds in chunk 5.
-
-**If the overlay closes the dialog too.** Then no lock screen can share the screen with it, since
-installers may hide overlay windows against tapjacking. The only route left would be re-launching the
-uninstall after unlocking, which needs the target package read out of the dialog's text. Not worth it:
-leave the wall and unprotect the package installer when something has to go.
-
-**Why bother.**
-
-- Unprotecting the installer leaves everything uninstallable with no prompt at all while it is off, and
-  it is easy to forget to protect it again.
-- The wall stops the owner, not a thief. Unprotecting needs the same PIN the gate would ask for.
-- Every other protected app behaves as a gate, so the installer looks broken when you hit it.
+**Not covered.** The Shizuku and Usage Stats backends lock with `PasswordOverlayActivity`, an
+activity that displaces the dialog by itself, so the same gate can't be built there. The phone runs
+the accessibility backend.
 
 **Note.** On a trusted network locked apps open without authentication, so the uninstall dialog comes
-up untouched there.
+up untouched there, as it always did.
 
 ## Following trusted Wi-Fi
 
