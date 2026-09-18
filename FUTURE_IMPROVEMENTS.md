@@ -27,7 +27,7 @@ Anything a stranger could see — a Quick Settings tile, a notification, a dialo
 | 16 | [Screen timeout by network](#16-screen-timeout-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#screen-timeout-by-network) |
 | 17 | [Lock-screen notification content by network](#17-lock-screen-notification-content-by-network) | Small to medium | Built, see [AUTOMATION.md](AUTOMATION.md#lock-screen-notification-content-by-network) |
 | 18 | [Secure Folder copies of locked apps](#18-secure-folder-copies-of-locked-apps) | Small (list fix) to large (per copy) | Done in [PR #25](https://github.com/thiagosoeiro/AppLock/pull/25), chunk 7 in [SECURITY_FIXES.md](SECURITY_FIXES.md) |
-| 19 | [Uninstall dialog closes behind the lock screen](#19-uninstall-dialog-closes-behind-the-lock-screen) | Small | In [PR #27](https://github.com/thiagosoeiro/AppLock/pull/27), chunk 8 in [SECURITY_FIXES.md](SECURITY_FIXES.md) |
+| 19 | [Uninstall dialog closes behind the lock screen](#19-uninstall-dialog-closes-behind-the-lock-screen) | Small | Done in [PR #27](https://github.com/thiagosoeiro/AppLock/pull/27), chunk 8 in [SECURITY_FIXES.md](SECURITY_FIXES.md) |
 
 ## Against someone holding the unlocked phone
 
@@ -212,9 +212,9 @@ A Quick Settings tile that re-locks every app at once, for handing the phone to 
 
 ### 19. Uninstall dialog closes behind the lock screen
 
-**In PR #27**, not merged yet. Found in use on 2026-09-17; the gate was confirmed working on the
-phone on 2026-09-18, and the same test turned up a loop in anti-uninstall that the PR now fixes as
-well. Chunk 8 of `SECURITY_FIXES.md` has both.
+**Done.** Found in use on 2026-09-17, fixed in PR #27 and merged on 2026-09-18. The gate was
+confirmed working on the phone that day, and the same test turned up a loop in anti-uninstall, fixed
+in the same PR but not yet tested itself. Chunk 8 of `SECURITY_FIXES.md` has both.
 
 **What happened.** The package installer is a protected app, so Android's uninstall confirmation
 brought up the lock screen. Authenticating didn't get the uninstall through: the dialog was gone by

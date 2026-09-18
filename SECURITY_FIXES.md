@@ -22,7 +22,7 @@ closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
 | 5 — Interrupted biometric prompt | — (found in use) | `fix/interrupted-biometric-prompt` | [#23](https://github.com/thiagosoeiro/AppLock/pull/23) | green (`442a865`) | 7 rounds, 1 check pending | 2026-09-16 |
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
-| 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`6835d37`) | 1 round, 1 fix | open |
+| 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -405,7 +405,7 @@ unprotect it. `FUTURE_IMPROVEMENTS.md` item 18 has the findings and the options 
   in `FUTURE_IMPROVEMENTS.md`; the test used `adb shell pm uninstall` instead.
 - **Merged** on 2026-09-17 in PR #25 after the first test.
 
-## Chunk 8 — Uninstall dialog closed behind the lock screen
+## Chunk 8 — Uninstall dialog closed behind the lock screen (done, phone test pending)
 
 Not from the audit. Found on 2026-09-17 while testing chunk 7. The package installer is a protected
 app, so Android's uninstall confirmation raises the lock screen - and authenticating never got the
@@ -454,7 +454,11 @@ to uninstall anything was to unprotect the installer first. `FUTURE_IMPROVEMENTS
   minutes sends Home - twice, since the page's window can be restored just after the unlock. The
   lock itself is untouched and still immediate. It covers the device admin page and the App info
   page as well, which can be trapped the same way.
-- **Second phone test.** Pending.
+- **Second phone test.** Not run before merging, at the owner's call. What to check: uninstall this
+  app, let the guard lock the phone, unlock it, and land on the launcher rather than on the dialog -
+  the log should read "Unlocked after a block: going home" with no second lock. Worth re-running the
+  gate itself too, since the guard path changed.
+- **Merged** on 2026-09-18 in PR #27 with CI green.
 
 ## Testing chunks 2 and 3
 
