@@ -3,13 +3,14 @@
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
 before merging, a fourth after anti-uninstall was beaten on the phone, a fifth after locked apps
 opened freely on the phone, a sixth after a notification brought up lock screens, a seventh after a
-Secure Folder copy kept locking with no row to unprotect it, and an eighth after the uninstall dialog
-kept closing behind the lock screen. The audit's findings table records the status of every finding,
+Secure Folder copy kept locking with no row to unprotect it, an eighth after the uninstall dialog
+kept closing behind the lock screen, and a ninth after a dictation app's bubble kept locking the app
+underneath. The audit's findings table records the status of every finding,
 including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
+closing it. Chunks 5 to 9 fix bugs found in use, not audit findings.
 
 ## Status
 
@@ -23,6 +24,7 @@ closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 | 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
+| 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | green (`7c6d446`) | 1 round | 2026-09-22 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -459,6 +461,58 @@ to uninstall anything was to unprotect the installer first. `FUTURE_IMPROVEMENTS
   the log should read "Unlocked after a block: going home" with no second lock. Worth re-running the
   gate itself too, since the guard path changed.
 - **Merged** on 2026-09-18 in PR #27 with CI green.
+
+## Chunk 9 — Floating window taken for an app switch (done)
+
+Not from the audit. On 2026-09-22, right after Wispr Flow (a dictation app) was installed, WhatsApp
+and Instagram locked again every few seconds while in use: 12 times in ten minutes, with the unlock
+time set to immediately.
+
+- **Why it happened.** Every time, the log read "Switched from unlocked app com.whatsapp to
+  com.wispr.flowapp (android.view.View, TYPE_WINDOW_CONTENT_CHANGED)", and the app's next event locked
+  it. Wispr draws a bubble over the app being typed in, and the bubble's events carry Wispr's
+  package. The service counted any change of package as leaving the app, so each redraw ended the
+  unlock of the app still on screen. Chunk 6 had left floating windows an app draws itself counting
+  as that app on purpose, so a locked app's chat head would still lock.
+- **Fix** (`7d9f7f0`). When an event's package differs from the last one, its window is looked up.
+  A window that isn't an app screen (an app's overlay, an accessibility overlay, a keyboard) is
+  ignored when its app isn't locked, with a "not an app screen" line logged once per app it floats
+  over. Such an app has nothing to lock, so all its events could do is end the unlock of the app
+  underneath.
+  - Locked apps take the same path as before, so a locked app's chat head still locks, and since
+    one app holds an unlock at a time, the app underneath asks again after it.
+  - Opening an app, the launcher, Recents or a pop-up or split-screen window is an app window, a real
+    switch as before.
+  - Chunk 6's System UI check still runs for locked apps. A notification from an app that isn't
+    locked is ignored as before, with the new line instead of "drawn by System UI".
+  - If the window list misses a window that has just appeared, the event's own window is asked for.
+    A window still not found counts as the app, so a lock is never skipped on a guess.
+  - The "Switched from unlocked app …" line now names the window type, or "window not found".
+  - Anti-uninstall checks run earlier and are unchanged.
+- **Side effects, from the code.**
+  - The bubble no longer becomes the "last app". After a biometric prompt goes away unanswered, the
+    re-check (chunk 5) now finds the locked app rather than the bubble, so its lock screen comes back
+    where before it could be left off.
+  - A floating window no longer ends the 5 s return window after Home, so Home, a panel, and back
+    within 5 s keeps the unlock.
+  - Not covered: picture-in-picture from an app that isn't locked is an app window, so it still
+    counts as a switch.
+- **First phone test** (2026-09-22, 22:02-22:14 local, same phone). The fix works.
+  - One UI reports Wispr's bubble as a SYSTEM window (an app overlay). It was ignored 14 times,
+    once per visit, and no "Switched … to com.wispr.flowapp" line appeared. WhatsApp and Instagram
+    stayed unlocked while typing with the bubble up, for up to 85 s, where before they locked again
+    every few seconds.
+  - Real switches still locked. Home is an app window ("APPLICATION window" in the switch line) and
+    ended the unlock, with a Wispr event right after it ignored "over" the launcher. WhatsApp to
+    Instagram through Recents asked for Instagram, and going back asked for WhatsApp. A return from
+    Home within 5 s kept the unlock.
+  - Chunk 5 still works. Leaving Instagram twice while its prompt was up brought its lock screen
+    back each time, then "waits for a tap" on the third open.
+  - One UI's always-on display service was ignored the same way. It isn't locked.
+  - Two launcher events logged "window not found" and counted as the launcher, as before.
+  - Not covered by this test: a notification from a locked app over another app (chunk 6), and Home
+    with a wait over 5 s straight back to the same app.
+- **Merged** on 2026-09-22 in PR #28 after the first test, with CI green.
 
 ## Testing chunks 2 and 3
 
