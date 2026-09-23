@@ -74,6 +74,10 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     private var lastForegroundPackage = ""
 
+    // The app whose floating window was last logged as ignored, until another app takes the
+    // foreground; see [isOverlayOfAppNotLocked].
+    private var lastIgnoredOverlayPackage = ""
+
     // The last app whose check was skipped because a biometric prompt was in flight, and the app it
     // was opened from, since the start of the current lock session; see [handleUnansweredPrompt].
     private var skippedDuringPromptPackage = ""
@@ -283,16 +287,32 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
 
         // Only a change of package can be mistaken for switching apps, so only then is the window looked up.
-        if (packageName != lastForegroundPackage && isFromSystemUiWindow(event)) {
-            LogUtils.d(
-                TAG,
-                "Ignored $packageName (${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}): drawn by System UI, such as its notification"
-            )
-            return
+        var windowDescription: String? = null
+        if (packageName != lastForegroundPackage) {
+            val window = eventWindow(event)
+            if (window != null && isOverlayOfAppNotLocked(packageName, window)) {
+                // A bubble keeps redrawing, so it is reported once for each app it floats over.
+                if (packageName != lastIgnoredOverlayPackage) {
+                    lastIgnoredOverlayPackage = packageName
+                    LogUtils.d(
+                        TAG,
+                        "Ignored $packageName (${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}): not an app screen (${windowTypeName(window.type)} window) and not locked, over $lastForegroundPackage"
+                    )
+                }
+                return
+            }
+            if (window != null && isFromSystemUiWindow(window)) {
+                LogUtils.d(
+                    TAG,
+                    "Ignored $packageName (${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}): drawn by System UI, such as its notification"
+                )
+                return
+            }
+            windowDescription = window?.let { "${windowTypeName(it.type)} window" } ?: "window not found"
         }
 
         try {
-            processPackageLocking(packageName, event)
+            processPackageLocking(packageName, event, windowDescription)
         } catch (e: Exception) {
             logError("Error processing package locking for $packageName", e)
         }
@@ -402,23 +422,62 @@ class AppLockAccessibilityService : AccessibilityService() {
      *
      * Only a window that is found, of the system type, with a System UI root counts. Anything
      * uncertain is taken as the app itself, as before, so a lock is never skipped on a guess. Floating
-     * windows an app draws itself, like chat heads, have that app's root and still count as the app.
+     * windows an app draws itself have that app's root and are left to [isOverlayOfAppNotLocked].
      */
-    private fun isFromSystemUiWindow(event: AccessibilityEvent): Boolean {
-        val window = try {
-            windows.firstOrNull { it.id == event.windowId }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not look up the window of an event", e)
-            null
-        } ?: return false
+    private fun isFromSystemUiWindow(window: AccessibilityWindowInfo): Boolean {
         if (window.type != AccessibilityWindowInfo.TYPE_SYSTEM) return false
         return window.root?.packageName?.toString() == SYSTEM_UI_PACKAGE
     }
 
-    private fun processPackageLocking(packageName: String, event: AccessibilityEvent) {
+    /**
+     * Whether [window] is not an app's screen - a floating bubble or overlay an app draws, an
+     * accessibility overlay, a keyboard - and belongs to an app that isn't locked.
+     *
+     * Such an app has nothing to lock, so all its events could do is end the unlock of the app
+     * underneath, which is still on screen: a dictation bubble over an unlocked chat locked the chat
+     * again every few seconds while typing. A locked app's floating window, like a chat head, is not
+     * skipped and locks as before. Opening an app, the launcher or Recents is an app window, so a
+     * real switch still ends the unlock.
+     */
+    private fun isOverlayOfAppNotLocked(packageName: String, window: AccessibilityWindowInfo): Boolean =
+        window.type != AccessibilityWindowInfo.TYPE_APPLICATION &&
+                packageName !in appLockRepository.getLockedApps()
+
+    /**
+     * The window [event] came from, or null when it can't be found. The list of windows can lag
+     * behind a window that has just appeared, so a miss asks for the event's own window as well.
+     */
+    private fun eventWindow(event: AccessibilityEvent): AccessibilityWindowInfo? = try {
+        windows.firstOrNull { it.id == event.windowId } ?: event.source?.window
+    } catch (e: Exception) {
+        Log.w(TAG, "Could not look up the window of an event", e)
+        null
+    }
+
+    private fun windowTypeName(type: Int): String = when (type) {
+        AccessibilityWindowInfo.TYPE_APPLICATION -> "APPLICATION"
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "INPUT_METHOD"
+        AccessibilityWindowInfo.TYPE_SYSTEM -> "SYSTEM"
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "ACCESSIBILITY_OVERLAY"
+        AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "SPLIT_SCREEN_DIVIDER"
+        else -> "type $type"
+    }
+
+    /**
+     * [windowDescription] names the kind of window the event came from, for the log, or is null
+     * when the package hadn't changed and the window wasn't looked up.
+     */
+    private fun processPackageLocking(
+        packageName: String,
+        event: AccessibilityEvent,
+        windowDescription: String?
+    ) {
         val currentForegroundPackage = packageName
         val triggeringPackage = lastForegroundPackage
         lastForegroundPackage = currentForegroundPackage
+        if (currentForegroundPackage != triggeringPackage) {
+            lastIgnoredOverlayPackage = ""
+        }
 
         // Skip if triggering package is excluded
         if (triggeringPackage in appLockRepository.getTriggerExcludedApps()) {
@@ -434,7 +493,8 @@ class AppLockAccessibilityService : AccessibilityService() {
             currentForegroundPackage !in appLockRepository.getTriggerExcludedApps()
         ) {
             // The window and event type say what took over, such as a dialog or another app's screen.
-            val takenOverBy = "${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}"
+            val takenOverBy = "${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}" +
+                    windowDescription?.let { ", $it" }.orEmpty()
             val surface = if (isNeutral) ", a neutral surface" else ""
             LogUtils.d(
                 TAG,
