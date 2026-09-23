@@ -24,7 +24,7 @@ closing it. Chunks 5 to 9 fix bugs found in use, not audit findings.
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 | 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
-| 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | | pending | |
+| 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | green (`7c6d446`) | 1 round | |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -462,7 +462,7 @@ to uninstall anything was to unprotect the installer first. `FUTURE_IMPROVEMENTS
   gate itself too, since the guard path changed.
 - **Merged** on 2026-09-18 in PR #27 with CI green.
 
-## Chunk 9 — Floating window taken for an app switch (phone test pending)
+## Chunk 9 — Floating window taken for an app switch (phone-tested, not merged)
 
 Not from the audit. On 2026-09-22, right after Wispr Flow (a dictation app) was installed, WhatsApp
 and Instagram locked again every few seconds while in use: 12 times in ten minutes, with the unlock
@@ -497,7 +497,21 @@ time set to immediately.
     within 5 s keeps the unlock.
   - Not covered: picture-in-picture from an app that isn't locked is an app window, so it still
     counts as a switch.
-- **Phone test.** Not run yet.
+- **First phone test** (2026-09-22, 22:02-22:14 local, same phone). The fix works.
+  - One UI reports Wispr's bubble as a SYSTEM window (an app overlay). It was ignored 14 times,
+    once per visit, and no "Switched … to com.wispr.flowapp" line appeared. WhatsApp and Instagram
+    stayed unlocked while typing with the bubble up, for up to 85 s, where before they locked again
+    every few seconds.
+  - Real switches still locked. Home is an app window ("APPLICATION window" in the switch line) and
+    ended the unlock, with a Wispr event right after it ignored "over" the launcher. WhatsApp to
+    Instagram through Recents asked for Instagram, and going back asked for WhatsApp. A return from
+    Home within 5 s kept the unlock.
+  - Chunk 5 still works. Leaving Instagram twice while its prompt was up brought its lock screen
+    back each time, then "waits for a tap" on the third open.
+  - One UI's always-on display service was ignored the same way. It isn't locked.
+  - Two launcher events logged "window not found" and counted as the launcher, as before.
+  - Not covered by this test: a notification from a locked app over another app (chunk 6), and Home
+    with a wait over 5 s straight back to the same app.
 
 ## Testing chunks 2 and 3
 
