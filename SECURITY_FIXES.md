@@ -3,13 +3,14 @@
 How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI and tested on a phone
 before merging, a fourth after anti-uninstall was beaten on the phone, a fifth after locked apps
 opened freely on the phone, a sixth after a notification brought up lock screens, a seventh after a
-Secure Folder copy kept locking with no row to unprotect it, and an eighth after the uninstall dialog
-kept closing behind the lock screen. The audit's findings table records the status of every finding,
+Secure Folder copy kept locking with no row to unprotect it, an eighth after the uninstall dialog
+kept closing behind the lock screen, and a ninth after a dictation app's bubble kept locking the app
+underneath. The audit's findings table records the status of every finding,
 including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
+closing it. Chunks 5 to 9 fix bugs found in use, not audit findings.
 
 ## Status
 
@@ -23,7 +24,7 @@ closing it. Chunks 5 to 8 fix bugs found in use, not audit findings.
 | 6 — Notification taken for an app switch | — (found in use) | `fix/notification-switch` | [#24](https://github.com/thiagosoeiro/AppLock/pull/24) | green (`5ea79ee`) | 1 round | 2026-09-16 |
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 | 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
-| 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | | | pending | |
+| 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | | pending | |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
