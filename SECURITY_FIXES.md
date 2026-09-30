@@ -25,7 +25,7 @@ closing it. Chunks 5 to 10 fix bugs found in use, not audit findings.
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 | 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
 | 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | green (`7c6d446`) | 1 round | 2026-09-22 |
-| 10 — Unseen window taken for an app switch | — (found in use) | `fix/unseen-window-switch` | [#29](https://github.com/thiagosoeiro/AppLock/pull/29) | green (`7b96e45`) | 1 round | — |
+| 10 — Unseen window taken for an app switch | — (found in use) | `fix/unseen-window-switch` | [#29](https://github.com/thiagosoeiro/AppLock/pull/29) | green (`7b96e45`) | 1 round | 2026-09-29 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -516,7 +516,7 @@ time set to immediately.
     with a wait over 5 s straight back to the same app.
 - **Merged** on 2026-09-22 in PR #28 after the first test, with CI green.
 
-## Chunk 10 — Unseen window taken for an app switch (in progress)
+## Chunk 10 — Unseen window taken for an app switch (done)
 
 Not from the audit. Reported on 2026-09-29: apps asked for the PIN again while in use, just from
 tapping into text boxes. It was noticed in Instagram and Uber, and the log has it in WhatsApp,
@@ -571,6 +571,8 @@ Chrome and Gmail as well, with the unlock time set to immediately.
     Returns from Home within 5 s kept the unlock 7 times, and one after 10 s asked.
   - Not covered by this test: opening an app that isn't locked and coming back, an unanswered
     biometric prompt (chunk 5), a notification over an unlocked app (chunk 6), and other locked apps.
+- **Merged** on 2026-09-29 in PR #29 after the first test, with CI green, without the untested cases
+  above.
 
 ## Testing chunks 2 and 3
 
