@@ -4,13 +4,13 @@ How the findings in `SECURITY_AUDIT.md` were fixed: three PRs, each built by CI 
 before merging, a fourth after anti-uninstall was beaten on the phone, a fifth after locked apps
 opened freely on the phone, a sixth after a notification brought up lock screens, a seventh after a
 Secure Folder copy kept locking with no row to unprotect it, an eighth after the uninstall dialog
-kept closing behind the lock screen, and a ninth after a dictation app's bubble kept locking the app
-underneath. The audit's findings table records the status of every finding,
+kept closing behind the lock screen, a ninth after a dictation app's bubble kept locking the app
+underneath, and a tenth after windows that Android hadn't listed yet kept doing the same while typing. The audit's findings table records the status of every finding,
 including the ones left open.
 
 In scope: F2, F3, F4, F5, F8, F19, F20 and F22. F1 and F18 were not taken on; F18 was considered and
 dropped as too complex. Chunk 4 came later: it fixes F9 and part of F12, and narrows F18 without
-closing it. Chunks 5 to 9 fix bugs found in use, not audit findings.
+closing it. Chunks 5 to 10 fix bugs found in use, not audit findings.
 
 ## Status
 
@@ -25,6 +25,7 @@ closing it. Chunks 5 to 9 fix bugs found in use, not audit findings.
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 | 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
 | 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | green (`7c6d446`) | 1 round | 2026-09-22 |
+| 10 — Unseen window taken for an app switch | — (found in use) | `fix/unseen-window-switch` | [#29](https://github.com/thiagosoeiro/AppLock/pull/29) | green (`7b96e45`) | 1 round | 2026-09-29 |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -486,7 +487,8 @@ time set to immediately.
   - Chunk 6's System UI check still runs for locked apps. A notification from an app that isn't
     locked is ignored as before, with the new line instead of "drawn by System UI".
   - If the window list misses a window that has just appeared, the event's own window is asked for.
-    A window still not found counts as the app, so a lock is never skipped on a guess.
+    A window still not found counts as the app, so a lock is never skipped on a guess (until
+    chunk 10).
   - The "Switched from unlocked app …" line now names the window type, or "window not found".
   - Anti-uninstall checks run earlier and are unchanged.
 - **Side effects, from the code.**
@@ -513,6 +515,64 @@ time set to immediately.
   - Not covered by this test: a notification from a locked app over another app (chunk 6), and Home
     with a wait over 5 s straight back to the same app.
 - **Merged** on 2026-09-22 in PR #28 after the first test, with CI green.
+
+## Chunk 10 — Unseen window taken for an app switch (done)
+
+Not from the audit. Reported on 2026-09-29: apps asked for the PIN again while in use, just from
+tapping into text boxes. It was noticed in Instagram and Uber, and the log has it in WhatsApp,
+Chrome and Gmail as well, with the unlock time set to immediately.
+
+- **Why it happened.** Every false re-lock in a week of logs followed a switch line ending in
+  "window not found", from one of two apps that aren't locked:
+  - Wispr Flow's bubble (`android.view.View`, TYPE_WINDOW_CONTENT_CHANGED): Instagram 5 times, and
+    WhatsApp, Chrome, Gmail and Uber once each.
+  - `com.google.android.ext.services` (`android.widget.FrameLayout`, TYPE_WINDOW_STATE_CHANGED):
+    Uber 9 times, 5 of them in 8 seconds. When its window was found it was the keyboard's, so these
+    are the autofill suggestions drawn in the keyboard. Each unlock handed focus back to the text
+    box, the keyboard came back, the suggestions were drawn again, and Uber asked again.
+
+  Both windows appear when a text box gets focus. Each miss sits in a burst of window changes, so
+  the event arrived before Android listed its window, and asking for the event's own window missed
+  too. Chunk 9 ignores such windows only once they are found; a window not found still counted as
+  switching to its app, which ended the unlock of the app in use. Chunk 9's plan had named this
+  timing risk.
+- **Fix.** An event whose window can't be found, from an app that isn't locked, now counts as a
+  switch only if it is that app opening one of its screens: a window state change naming one of its
+  activities, checked with the package manager. Anything else is ignored until that app sends an
+  event whose window can be seen, with a "window not found, not a screen of it opening, and not
+  locked" line logged once per app it shows over. No app is named in the code.
+  - Locked apps take the same path as before, so an event of theirs still locks with its window
+    not found.
+  - An app opening a screen still ends the unlock at once. The week's one real switch whose window
+    wasn't found, from the Play Store to a consent screen of another app, was a screen opening.
+  - If the activity check fails for any reason other than the class not being an activity, the
+    event counts as a switch, as before.
+  - Anti-uninstall checks run earlier and are unchanged.
+- **Side effects, from the code.**
+  - As in chunk 9, an ignored event no longer becomes the "last app". After an unanswered biometric
+    prompt, the re-check (chunk 5) finds the locked app, and an ignored event after Home no longer
+    ends the 5 s return window.
+  - A launcher event whose window isn't found no longer starts the 5 s return window. In the week's
+    log all 9 came right after a launcher event that had already started it.
+  - A notification from an app that isn't locked, whose window isn't found, is now ignored too.
+  - Left open: a real switch to an app that isn't locked, whose only events before coming back are
+    unseen and aren't a screen opening, ends the unlock on that app's next visible event rather than
+    at once. In the log the window list caught up within about 50 ms of each miss.
+- **First phone test** (2026-09-29, 21:16-21:19 local, same phone, Instagram and Uber). The fix works.
+  - Six events had no window found and were ignored: Wispr's bubble 3 times (twice over Instagram,
+    once over Uber), the autofill suggestions twice over Uber, and the launcher once. None ended an
+    unlock, and no switch line ended in "window not found". Before the fix, each of the Wispr and
+    autofill ones would have locked the app again.
+  - The same windows were also ignored when found (Wispr as SYSTEM 7 times, the suggestions as
+    INPUT_METHOD twice), each kind logged once per visit.
+  - The launcher event with no window found came 59 ms before the Launcher screen event, which was
+    found and started the 5 s return window as before.
+  - Real switches still locked. Switching between Instagram and Uber through Home asked all 9 times.
+    Returns from Home within 5 s kept the unlock 7 times, and one after 10 s asked.
+  - Not covered by this test: opening an app that isn't locked and coming back, an unanswered
+    biometric prompt (chunk 5), a notification over an unlocked app (chunk 6), and other locked apps.
+- **Merged** on 2026-09-29 in PR #29 after the first test, with CI green, without the untested cases
+  above.
 
 ## Testing chunks 2 and 3
 
