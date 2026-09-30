@@ -567,7 +567,7 @@ Chrome and Gmail as well, with the unlock time set to immediately.
     INPUT_METHOD twice), each kind logged once per visit.
   - The launcher event with no window found came 59 ms before the Launcher screen event, which was
     found and started the 5 s return window as before.
-  - Real switches still locked. Instagram and Uber, switched through Home 12 times, asked every time.
+  - Real switches still locked. Switching between Instagram and Uber through Home asked all 9 times.
     Returns from Home within 5 s kept the unlock 7 times, and one after 10 s asked.
   - Not covered by this test: opening an app that isn't locked and coming back, an unanswered
     biometric prompt (chunk 5), a notification over an unlocked app (chunk 6), and other locked apps.
