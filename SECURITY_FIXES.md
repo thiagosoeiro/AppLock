@@ -25,7 +25,7 @@ closing it. Chunks 5 to 10 fix bugs found in use, not audit findings.
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 | 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
 | 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | green (`7c6d446`) | 1 round | 2026-09-22 |
-| 10 — Unseen window taken for an app switch | — (found in use) | `fix/unseen-window-switch` | [#29](https://github.com/thiagosoeiro/AppLock/pull/29) | — | — | — |
+| 10 — Unseen window taken for an app switch | — (found in use) | `fix/unseen-window-switch` | [#29](https://github.com/thiagosoeiro/AppLock/pull/29) | green (`7b96e45`) | 1 round | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
@@ -558,6 +558,19 @@ Chrome and Gmail as well, with the unlock time set to immediately.
   - Left open: a real switch to an app that isn't locked, whose only events before coming back are
     unseen and aren't a screen opening, ends the unlock on that app's next visible event rather than
     at once. In the log the window list caught up within about 50 ms of each miss.
+- **First phone test** (2026-09-29, 21:16-21:19 local, same phone, Instagram and Uber). The fix works.
+  - Six events had no window found and were ignored: Wispr's bubble 3 times (twice over Instagram,
+    once over Uber), the autofill suggestions twice over Uber, and the launcher once. None ended an
+    unlock, and no switch line ended in "window not found". Before the fix, each of the Wispr and
+    autofill ones would have locked the app again.
+  - The same windows were also ignored when found (Wispr as SYSTEM 7 times, the suggestions as
+    INPUT_METHOD twice), each kind logged once per visit.
+  - The launcher event with no window found came 59 ms before the Launcher screen event, which was
+    found and started the 5 s return window as before.
+  - Real switches still locked. Instagram and Uber, switched through Home 12 times, asked every time.
+    Returns from Home within 5 s kept the unlock 7 times, and one after 10 s asked.
+  - Not covered by this test: opening an app that isn't locked and coming back, an unanswered
+    biometric prompt (chunk 5), a notification over an unlocked app (chunk 6), and other locked apps.
 
 ## Testing chunks 2 and 3
 
