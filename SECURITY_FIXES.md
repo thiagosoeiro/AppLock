@@ -25,7 +25,7 @@ closing it. Chunks 5 to 10 fix bugs found in use, not audit findings.
 | 7 — Secure Folder copy with no row | — (found in use) | `fix/secure-folder-locks` | [#25](https://github.com/thiagosoeiro/AppLock/pull/25) | green (`7405a03`) | 1 round | 2026-09-17 |
 | 8 — Uninstall dialog behind the lock screen | — (found in use) | `fix/installer-pin-only` | [#27](https://github.com/thiagosoeiro/AppLock/pull/27) | green (`4ca66b3`) | 1 round, 2nd pending | 2026-09-18 |
 | 9 — Floating window taken for an app switch | — (found in use) | `fix/floating-window-switch` | [#28](https://github.com/thiagosoeiro/AppLock/pull/28) | green (`7c6d446`) | 1 round | 2026-09-22 |
-| 10 — Unseen window taken for an app switch | — (found in use) | `fix/unseen-window-switch` | — | — | — | — |
+| 10 — Unseen window taken for an app switch | — (found in use) | `fix/unseen-window-switch` | [#29](https://github.com/thiagosoeiro/AppLock/pull/29) | — | — | — |
 
 F22 was already done (fixed in `5d9935c`). F20's main fix shipped in `907ddac`, and chunk 1 closed
 the gap it left.
