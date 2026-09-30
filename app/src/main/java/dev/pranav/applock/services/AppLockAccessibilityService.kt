@@ -8,6 +8,7 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Handler
 import android.os.LocaleList
@@ -77,6 +78,9 @@ class AppLockAccessibilityService : AccessibilityService() {
     // The app whose floating window was last logged as ignored, until another app takes the
     // foreground; see [isOverlayOfAppNotLocked].
     private var lastIgnoredOverlayPackage = ""
+
+    // The same for an app whose window could not be found; see [isUnseenEventOfAppNotLocked].
+    private var lastIgnoredUnseenPackage = ""
 
     // The last app whose check was skipped because a biometric prompt was in flight, and the app it
     // was opened from, since the start of the current lock session; see [handleUnansweredPrompt].
@@ -308,6 +312,16 @@ class AppLockAccessibilityService : AccessibilityService() {
                 )
                 return
             }
+            if (window == null && isUnseenEventOfAppNotLocked(packageName, event)) {
+                if (packageName != lastIgnoredUnseenPackage) {
+                    lastIgnoredUnseenPackage = packageName
+                    LogUtils.d(
+                        TAG,
+                        "Ignored $packageName (${event.className}, ${AccessibilityEvent.eventTypeToString(event.eventType)}): window not found, not a screen of it opening, and not locked, over $lastForegroundPackage"
+                    )
+                }
+                return
+            }
             windowDescription = window?.let { "${windowTypeName(it.type)} window" } ?: "window not found"
         }
 
@@ -420,9 +434,10 @@ class AppLockAccessibilityService : AccessibilityService() {
      * up, and the app in front loses its unlock and locks again after it. The window itself still
      * belongs to System UI, which its root view shows.
      *
-     * Only a window that is found, of the system type, with a System UI root counts. Anything
-     * uncertain is taken as the app itself, as before, so a lock is never skipped on a guess. Floating
-     * windows an app draws itself have that app's root and are left to [isOverlayOfAppNotLocked].
+     * Only a window that is found, of the system type, with a System UI root counts. A window that
+     * isn't found is taken as a locked app itself, as before, so its lock is never skipped on a guess;
+     * for an app that isn't locked, see [isUnseenEventOfAppNotLocked]. Floating windows an app draws
+     * itself have that app's root and are left to [isOverlayOfAppNotLocked].
      */
     private fun isFromSystemUiWindow(window: AccessibilityWindowInfo): Boolean {
         if (window.type != AccessibilityWindowInfo.TYPE_SYSTEM) return false
@@ -444,8 +459,50 @@ class AppLockAccessibilityService : AccessibilityService() {
                 packageName !in appLockRepository.getLockedApps()
 
     /**
+     * Whether [event], whose window could not be found, belongs to an app that isn't locked and is
+     * not that app opening one of its screens.
+     *
+     * A window that has just appeared can send its first event before Android lists it, and then
+     * neither lookup in [eventWindow] finds it. A dictation bubble or the keyboard's autofill
+     * suggestions showing up as a text box gets focus did exactly that, and each miss ended the
+     * unlock of the app being typed in, which then locked again. The suggestions came back after
+     * every unlock, so an app could ask several times in a row.
+     *
+     * Such an event is left for a later one whose window can be seen: an app's own screen sends
+     * plenty, and the first of them ends the unlock as a switch. An app opening a screen still counts
+     * at once, window or not, and a locked app's events are never skipped.
+     */
+    private fun isUnseenEventOfAppNotLocked(packageName: String, event: AccessibilityEvent): Boolean =
+        packageName !in appLockRepository.getLockedApps() && !isAppScreenOpening(packageName, event)
+
+    /**
+     * Whether [event] is [packageName] opening one of its screens: a window state change that names
+     * one of its activities, rather than a view, a dialog or a popup. A lookup that fails for any
+     * other reason than the class not being an activity counts as a screen, as the event would have
+     * before.
+     */
+    private fun isAppScreenOpening(packageName: String, event: AccessibilityEvent): Boolean {
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return false
+        val className = event.className?.toString()
+        if (className.isNullOrEmpty()) return false
+        return try {
+            packageManager.getActivityInfo(
+                ComponentName(packageName, className),
+                PackageManager.MATCH_DISABLED_COMPONENTS
+            )
+            true
+        } catch (e: PackageManager.NameNotFoundException) {
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not tell whether $className is a screen of $packageName", e)
+            true
+        }
+    }
+
+    /**
      * The window [event] came from, or null when it can't be found. The list of windows can lag
      * behind a window that has just appeared, so a miss asks for the event's own window as well.
+     * What a miss means for the lock is up to the caller; see [isUnseenEventOfAppNotLocked].
      */
     private fun eventWindow(event: AccessibilityEvent): AccessibilityWindowInfo? = try {
         windows.firstOrNull { it.id == event.windowId } ?: event.source?.window
@@ -477,6 +534,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         lastForegroundPackage = currentForegroundPackage
         if (currentForegroundPackage != triggeringPackage) {
             lastIgnoredOverlayPackage = ""
+            lastIgnoredUnseenPackage = ""
         }
 
         // Skip if triggering package is excluded
